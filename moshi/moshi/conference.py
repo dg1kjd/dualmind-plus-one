@@ -296,6 +296,7 @@ def persona_worker_process(
     diag_code_count = [0]
     diag_token_count = [0]
     diag_none_count = [0]
+    diag_input_rms_sum = [0.0]
     
     def process_frame(audio_chunk: np.ndarray) -> tuple:
         """Process exactly one frame of audio"""
@@ -304,6 +305,9 @@ def persona_worker_process(
         output_len = 0
         
         diag_frame_count[0] += 1
+        # Track input RMS to verify user audio reaches worker
+        input_rms = float(np.sqrt(np.mean(audio_chunk ** 2))) if len(audio_chunk) > 0 else 0.0
+        diag_input_rms_sum[0] += input_rms
         
         with torch.no_grad():
             chunk_tensor = torch.from_numpy(audio_chunk).to(device=device)[None, None]
@@ -341,7 +345,9 @@ def persona_worker_process(
         
         # Log diagnostics every 20 frames (~1 second)
         if diag_frame_count[0] % 20 == 0:
-            print(f"[{name}] frames={diag_frame_count[0]} codes={diag_code_count[0]} tokens={diag_token_count[0]} none={diag_none_count[0]} output_len={output_len} level={audio_level:.4f}")
+            avg_input_rms = diag_input_rms_sum[0] / 20
+            diag_input_rms_sum[0] = 0.0
+            print(f"[{name}] frames={diag_frame_count[0]} codes={diag_code_count[0]} tokens={diag_token_count[0]} none={diag_none_count[0]} output_len={output_len} level={audio_level:.4f} in_rms={avg_input_rms:.4f}")
         
         return output_accum[:output_len], new_text, audio_level
     
@@ -643,22 +649,27 @@ class ConferenceServer:
                     stats['mixer_cycles'] += 1
                     
                     # === Mix for each destination using PREVIOUS frame outputs ===
+                    # Track user audio level for diagnostics
+                    user_rms = float(np.sqrt(np.mean(user_frame ** 2))) if len(user_frame) > 0 else 0.0
+                    stats['user_rms_sum'] = stats.get('user_rms_sum', 0.0) + user_rms
+                    stats['user_rms_count'] = stats.get('user_rms_count', 0) + 1
+                    
                     # To A: user + B (A hears user and B)
                     mix_for_a = np.zeros(self.frame_size, dtype=np.float32)
                     b_len = min(len(b_output), self.frame_size)
                     user_len = min(len(user_frame), self.frame_size)
                     if b_len > 0:
-                        mix_for_a[:b_len] = 0.7 * b_output[:b_len]
+                        mix_for_a[:b_len] = 0.5 * b_output[:b_len]
                     if user_len > 0:
-                        mix_for_a[:user_len] += 0.3 * user_frame[:user_len]
+                        mix_for_a[:user_len] += 0.5 * user_frame[:user_len]
                     
                     # To B: user + A (B hears user and A)
                     mix_for_b = np.zeros(self.frame_size, dtype=np.float32)
                     a_len = min(len(a_output), self.frame_size)
                     if a_len > 0:
-                        mix_for_b[:a_len] = 0.7 * a_output[:a_len]
+                        mix_for_b[:a_len] = 0.5 * a_output[:a_len]
                     if user_len > 0:
-                        mix_for_b[:user_len] += 0.3 * user_frame[:user_len]
+                        mix_for_b[:user_len] += 0.5 * user_frame[:user_len]
                     
                     # === Write to shared memory and signal workers ===
                     self.persona_a.input_buffer.write(mix_for_a)
@@ -746,13 +757,16 @@ class ConferenceServer:
                         mix_rms = float(np.sqrt(np.mean(mix_for_user ** 2))) if len(mix_for_user) > 0 else 0.0
                         user_opus = stats.get('user_opus_bytes', 0)
                         user_frames = stats.get('user_frames', 0)
-                        logger.info(f"[STATS] mixer={stats['mixer_cycles']} a={stats['a_frames']} b={stats['b_frames']} opus={stats['opus_bytes_sent']} user_opus={user_opus} user_frames={user_frames} | a_rms={a_rms:.4f} b_rms={b_rms:.4f} mix_rms={mix_rms:.4f}")
+                        user_rms_avg = stats.get('user_rms_sum', 0.0) / max(1, stats.get('user_rms_count', 1))
+                        logger.info(f"[STATS] mixer={stats['mixer_cycles']} a={stats['a_frames']} b={stats['b_frames']} opus={stats['opus_bytes_sent']} user_opus={user_opus} user_frames={user_frames} | a_rms={a_rms:.4f} b_rms={b_rms:.4f} mix_rms={mix_rms:.4f} user_rms={user_rms_avg:.4f}")
                         stats['mixer_cycles'] = 0
                         stats['a_frames'] = 0
                         stats['b_frames'] = 0
                         stats['opus_bytes_sent'] = 0
                         stats['user_opus_bytes'] = 0
                         stats['user_frames'] = 0
+                        stats['user_rms_sum'] = 0.0
+                        stats['user_rms_count'] = 0
                         last_stats_time = now
                         
             except asyncio.CancelledError:
