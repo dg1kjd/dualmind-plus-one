@@ -31,8 +31,10 @@ class ConferenceClient {
         
         // Visualization
         this.animationFrame = null;
-        this.visualizerDataA = new Array(64).fill(0);
-        this.visualizerDataB = new Array(64).fill(0);
+        this.analyser = null;
+        this.frequencyData = null;
+        this.visualizerDataA = new Float32Array(64);
+        this.visualizerDataB = new Float32Array(64);
         
         this.initElements();
         this.initEventListeners();
@@ -93,6 +95,9 @@ class ConferenceClient {
     
     startVisualizerLoop() {
         const draw = () => {
+            // Update from real spectrum data
+            this.updateVisualizersFromSpectrum();
+            
             this.drawVisualizer(this.ctxA, this.elements.visualizerA, this.visualizerDataA, '#76b900');
             this.drawVisualizer(this.ctxB, this.elements.visualizerB, this.visualizerDataB, '#00d4ff');
             this.animationFrame = requestAnimationFrame(draw);
@@ -139,16 +144,31 @@ class ConferenceClient {
         }
     }
     
-    updateVisualizerFromLevel(data, level) {
-        // Create wave-like pattern based on audio level
-        const intensity = Math.min(level * 10, 1);
-        const time = Date.now() / 1000;
+    updateVisualizersFromSpectrum() {
+        if (!this.analyser || !this.frequencyData) return;
         
-        for (let i = 0; i < data.length; i++) {
-            const wave = Math.sin(time * 3 + i * 0.3) * 0.5 + 0.5;
-            const random = Math.random() * 0.3;
-            const value = intensity * (wave * 0.7 + random);
-            data[i] = Math.max(data[i], value);
+        // Get real frequency data from analyser
+        this.analyser.getByteFrequencyData(this.frequencyData);
+        
+        // Map frequency bins to visualizer bars (64 bars from 128 bins)
+        const binsPerBar = Math.floor(this.frequencyData.length / 64);
+        
+        for (let i = 0; i < 64; i++) {
+            // Average frequency bins for this bar
+            let sum = 0;
+            for (let j = 0; j < binsPerBar; j++) {
+                sum += this.frequencyData[i * binsPerBar + j];
+            }
+            const normalizedValue = (sum / binsPerBar) / 255;
+            
+            // Scale by persona levels to create differentiated visualizers
+            // A gets more low frequencies, B gets more high frequencies
+            const freqBias = i / 64;  // 0 = low freq, 1 = high freq
+            const scaleA = this.levelA * (1.2 - freqBias * 0.4);  // Boost lows for A
+            const scaleB = this.levelB * (0.8 + freqBias * 0.4);  // Boost highs for B
+            
+            this.visualizerDataA[i] = Math.max(this.visualizerDataA[i] * 0.85, normalizedValue * scaleA * 8);
+            this.visualizerDataB[i] = Math.max(this.visualizerDataB[i] * 0.85, normalizedValue * scaleB * 8);
         }
     }
     
@@ -165,10 +185,19 @@ class ConferenceClient {
             // Setup decoder worker for server audio playback
             await this.initDecoder();
             
-            // Setup playback worklet
+            // Setup playback worklet with spectrum analyser
             await this.audioContext.audioWorklet.addModule('audio-processor.js');
             this.playbackWorklet = new AudioWorkletNode(this.audioContext, 'conference-processor');
-            this.playbackWorklet.connect(this.audioContext.destination);
+            
+            // Create analyser for real spectrum visualization
+            this.analyser = this.audioContext.createAnalyser();
+            this.analyser.fftSize = 256;  // 128 frequency bins
+            this.analyser.smoothingTimeConstant = 0.7;
+            this.frequencyData = new Uint8Array(this.analyser.frequencyBinCount);
+            
+            // Connect: worklet -> analyser -> destination
+            this.playbackWorklet.connect(this.analyser);
+            this.analyser.connect(this.audioContext.destination);
             
             // Decoder worker sends decoded PCM to playback worklet
             // Handle both array format [Float32Array] and direct Float32Array
@@ -438,9 +467,7 @@ class ConferenceClient {
             const levels = JSON.parse(new TextDecoder().decode(payload));
             this.levelA = levels.level_a || 0;
             this.levelB = levels.level_b || 0;
-            
-            this.updateVisualizerFromLevel(this.visualizerDataA, this.levelA);
-            this.updateVisualizerFromLevel(this.visualizerDataB, this.levelB);
+            // Levels are used by updateVisualizersFromSpectrum() to scale the real spectrum
         } catch (e) {
             console.error('Failed to parse levels:', e);
         }
