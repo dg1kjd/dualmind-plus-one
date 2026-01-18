@@ -557,6 +557,7 @@ class ConferenceServer:
                     kind = data[0]
                     if kind == 1:  # User audio
                         user_opus_reader.append_bytes(data[1:])
+                        stats['user_opus_bytes'] = stats.get('user_opus_bytes', 0) + len(data) - 1
                     elif kind == 10:  # Config update
                         try:
                             config = json.loads(data[1:].decode('utf-8'))
@@ -575,15 +576,30 @@ class ConferenceServer:
         async def user_input_loop():
             """Read decoded user PCM and send to mixer"""
             logger.info("[UserInput] Started")
+            # Accumulate partial frames
+            user_accum = np.zeros(self.frame_size * 2, dtype=np.float32)
+            user_accum_len = 0
+            
             try:
                 while not close:
                     await asyncio.sleep(0.005)
                     user_pcm = user_opus_reader.read_pcm()
                     
-                    if user_pcm.shape[-1] >= self.frame_size:
-                        offset = 0
-                        while offset + self.frame_size <= len(user_pcm):
-                            frame = user_pcm[offset:offset + self.frame_size]
+                    if user_pcm.shape[-1] > 0:
+                        # Accumulate incoming PCM
+                        pcm_len = user_pcm.shape[-1]
+                        if user_accum_len + pcm_len <= len(user_accum):
+                            user_accum[user_accum_len:user_accum_len + pcm_len] = user_pcm
+                            user_accum_len += pcm_len
+                        
+                        # Send complete frames
+                        while user_accum_len >= self.frame_size:
+                            frame = user_accum[:self.frame_size].copy()
+                            # Shift remaining data
+                            user_accum[:user_accum_len - self.frame_size] = user_accum[self.frame_size:user_accum_len]
+                            user_accum_len -= self.frame_size
+                            
+                            stats['user_frames'] = stats.get('user_frames', 0) + 1
                             try:
                                 user_to_mixer.put_nowait(frame)
                             except asyncio.QueueFull:
@@ -592,18 +608,6 @@ class ConferenceServer:
                                 except asyncio.QueueEmpty:
                                     pass
                                 user_to_mixer.put_nowait(frame)
-                            offset += self.frame_size
-                    elif user_pcm.shape[-1] > 0:
-                        frame = np.zeros(self.frame_size, dtype=np.float32)
-                        frame[:len(user_pcm)] = user_pcm
-                        try:
-                            user_to_mixer.put_nowait(frame)
-                        except asyncio.QueueFull:
-                            try:
-                                user_to_mixer.get_nowait()
-                            except asyncio.QueueEmpty:
-                                pass
-                            user_to_mixer.put_nowait(frame)
             except asyncio.CancelledError:
                 pass
             finally:
@@ -740,11 +744,15 @@ class ConferenceServer:
                         a_rms = float(np.sqrt(np.mean(a_output ** 2))) if len(a_output) > 0 else 0.0
                         b_rms = float(np.sqrt(np.mean(b_output ** 2))) if len(b_output) > 0 else 0.0
                         mix_rms = float(np.sqrt(np.mean(mix_for_user ** 2))) if len(mix_for_user) > 0 else 0.0
-                        logger.info(f"[STATS] mixer={stats['mixer_cycles']} a={stats['a_frames']} b={stats['b_frames']} opus={stats['opus_bytes_sent']} | a_rms={a_rms:.4f} b_rms={b_rms:.4f} mix_rms={mix_rms:.4f}")
+                        user_opus = stats.get('user_opus_bytes', 0)
+                        user_frames = stats.get('user_frames', 0)
+                        logger.info(f"[STATS] mixer={stats['mixer_cycles']} a={stats['a_frames']} b={stats['b_frames']} opus={stats['opus_bytes_sent']} user_opus={user_opus} user_frames={user_frames} | a_rms={a_rms:.4f} b_rms={b_rms:.4f} mix_rms={mix_rms:.4f}")
                         stats['mixer_cycles'] = 0
                         stats['a_frames'] = 0
                         stats['b_frames'] = 0
                         stats['opus_bytes_sent'] = 0
+                        stats['user_opus_bytes'] = 0
+                        stats['user_frames'] = 0
                         last_stats_time = now
                         
             except asyncio.CancelledError:

@@ -17,12 +17,14 @@ class ConferenceProcessor extends AudioWorkletProcessor {
         this.readPos = 0;
         this.bufferedSamples = 0;
         
-        // Start playback with minimal latency - just 2 worklet frames (256 samples = ~5ms)
-        this.initialBufferSize = 256;
+        // Buffer ~1 frame (80ms) before starting playback to prevent underruns
+        // At 48kHz, 80ms = 3840 samples. This adds latency only to user speaker output,
+        // not to A-B communication which happens server-side.
+        this.initialBufferSize = 3840;
         this.started = false;
         // Don't stop playback until buffer is truly empty for sustained period
         this.emptyFrameCount = 0;
-        this.maxEmptyFrames = 3;  // Allow 3 empty frames (~8ms) before stopping
+        this.maxEmptyFrames = 10;  // Allow 10 empty frames (~21ms) before pausing
         
         console.log(`ConferenceProcessor: sampleRate=${sampleRate}, initialBuffer=${this.initialBufferSize}`);
         
