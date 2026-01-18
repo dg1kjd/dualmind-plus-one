@@ -29,7 +29,7 @@ to fully deactivate it easily with a context manager.
 Provides a simple activation checkpointing that is compatible with FSDP and torch compile.
 Finally, provides some utilities for CUDA graphing functions.
 """
-from contextlib import contextmanager
+from contextlib import contextmanager, nullcontext
 from functools import wraps
 import inspect
 import os
@@ -213,19 +213,15 @@ class CUDAGraphed:
     Args:
         func: callable, taking any number of arguments. Its tensors arguments should
             be top level args, not nested in structures (tuples, dicts, etc). Keyword
-            arguments are NOT supported for simplicity.
-        warmup_steps: how many call to make normally before CUDA Graphing. In particular, this
-            allows torch.compiled functions to get properly compiled.
-        disabled: if True, just call the func directly, useful to quickly deactivate on CPU.
     """
-
-    def __init__(self, func: tp.Callable, warmup_steps: int = 1, disable: bool = False):
+    def __init__(self, func: tp.Callable, disable: bool = False, warmup_steps: int = 1, device: torch.device | None = None):
         self.func = func
         self.warmup_steps = warmup_steps
         self.disable = disable
+        self.device = device  # Explicit device for multi-GPU support
         self._graph: cuda.CUDAGraph | None = None
-        self._output: tuple | None = None
-        self._args: tuple | None = None
+        self._output: tp.Any = None
+        self._args = None
 
     def reset(self, warmup_steps: int = 0) -> None:
         """Reset the state, meaning the next call we get CUDA Graphed again. Useful if some
@@ -237,6 +233,15 @@ class CUDAGraphed:
 
     def asdict(self):
         return {}
+
+    def _infer_device(self, args: tuple) -> torch.device | None:
+        """Infer device from first tensor argument if not explicitly set."""
+        if self.device is not None:
+            return self.device
+        for arg in args:
+            if isinstance(arg, torch.Tensor) and arg.device.type == 'cuda':
+                return arg.device
+        return None
 
     def __call__(self, *args, **kwargs) -> tp.Any:
         if kwargs:
@@ -275,30 +280,36 @@ class CUDAGraphed:
                         )
                     if source is not target and source != target:
                         raise ValueError(
-                            f"Argument #{idx} changed value from {target} to {source}."
-                        )
+                            f"Argument #{idx} changed value from {target} to {source}.")
 
-        with _set_in_cuda_graph():
-            # Prevent any one under us to try and CUDA Graph things.
-            if self._graph is None:
-                if self.warmup_steps <= 0:
-                    self._graph = cuda.CUDAGraph()
-                    # Making a copy just to ensure those are not used else where.
-                    self._args = _clone_tensors(args)
-                    with cuda.graph(self._graph):
-                        self._output = self.func(*self._args)
-                    # At this point nothing really happened, so we have to make it run for real.
+        # Infer device for proper CUDA graph capture/replay (critical for multi-GPU)
+        graph_device = self._infer_device(args)
+        
+        # Use device context for graph operations
+        device_ctx = cuda.device(graph_device) if graph_device is not None else nullcontext()
+        
+        with device_ctx:
+            with _set_in_cuda_graph():
+                # Prevent any one under us to try and CUDA Graph things.
+                if self._graph is None:
+                    if self.warmup_steps <= 0:
+                        self._graph = cuda.CUDAGraph()
+                        # Making a copy just to ensure those are not used else where.
+                        self._args = _clone_tensors(args)
+                        with cuda.graph(self._graph):
+                            self._output = self.func(*self._args)
+                        # At this point nothing really happened, so we have to make it run for real.
+                        self._graph.replay()
+                        return self._output
+                    else:
+                        self.warmup_steps -= 1
+                        return self.func(*args)
+                else:
+                    assert self._args is not None
+                    assert self._output is not None
+                    _match_values_copy_tensors(args, self._args)
                     self._graph.replay()
                     return self._output
-                else:
-                    self.warmup_steps -= 1
-                    return self.func(*args)
-            else:
-                assert self._args is not None
-                assert self._output is not None
-                _match_values_copy_tensors(args, self._args)
-                self._graph.replay()
-                return self._output
 
 
 def cuda_graph(func: tp.Callable, warmup_steps: int = 1):

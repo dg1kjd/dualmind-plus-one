@@ -173,22 +173,19 @@ def get_moshi_lm(
     if delays is not None:
         lm_kwargs["delays"] = delays
 
-    model = LMModel(device=device, dtype=dtype, **lm_kwargs).to(device=device, dtype=dtype)
+    # Create model on CPU first to avoid GPU OOM during weight loading
+    model = LMModel(device="cpu", dtype=dtype, **lm_kwargs)
 
     if filename is None:
+        model.to(device=device)
         model.eval()
         return model
 
     filename = str(filename)
 
-    # Load state_dict
+    # Load state_dict to CPU
     if filename.endswith(".safetensors"):
-        # safetensors does not support mps directly
-        dev = torch.device(device) if isinstance(device, str) else device
-        if dev.type == "mps":
-            state_dict = load_file(filename, device="cpu")
-        else:
-            state_dict = load_file(filename, device=dev.type)
+        state_dict = load_file(filename, device="cpu")
     else:
         # torch checkpoint
         with open(filename, "rb") as f:
@@ -229,7 +226,14 @@ def get_moshi_lm(
             if not replaced:
                 print("Missing %s", name)
 
+    # Convert state_dict to target dtype on CPU (avoids GPU OOM)
+    for name in state_dict:
+        t = state_dict[name]
+        if t.is_floating_point():
+            state_dict[name] = t.to(dtype=dtype)
+
     model.load_state_dict(state_dict, strict=False, assign=True)
-    model.to(device)
+    del state_dict  # Free CPU memory before GPU transfer
+    model.to(device=device)
     model.eval()
     return model

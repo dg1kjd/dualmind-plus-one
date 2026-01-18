@@ -716,10 +716,10 @@ class LMGen(StreamingModule[_LMGenState]):
         )
 
         disable = lm_model.device.type != 'cuda'
-        # disable = True # DEBUG
-        graphed_main = CUDAGraphed(lm_model.forward_codes, disable=disable)
-        graphed_embeddings = CUDAGraphed(lm_model.forward_embeddings, disable=disable)
-        graphed_depth = CUDAGraphed(self.depformer_step, disable=disable)
+        # With multiprocessing, each worker has its own CUDA context so graphs work on all GPUs
+        graphed_main = CUDAGraphed(lm_model.forward_codes, disable=disable, device=lm_model.device)
+        graphed_embeddings = CUDAGraphed(lm_model.forward_embeddings, disable=disable, device=lm_model.device)
+        graphed_depth = CUDAGraphed(self.depformer_step, disable=disable, device=lm_model.device)
 
         return _LMGenState(cache, provided, initial, graphed_main, graphed_embeddings, graphed_depth)
     
