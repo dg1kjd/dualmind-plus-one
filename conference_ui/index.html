@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>PersonaPlex Conference</title>
+    <title>DualMind+1 — MoshiPlex Edition</title>
     <style>
         * {
             margin: 0;
@@ -141,14 +141,6 @@
 
         .persona-panel.right .persona-name {
             color: #00d4ff;
-        }
-
-        .gpu-badge {
-            font-size: 0.75rem;
-            padding: 4px 10px;
-            background: rgba(255,255,255,0.1);
-            border-radius: 10px;
-            color: #888;
         }
 
         .visualizer-container {
@@ -333,19 +325,83 @@
             box-shadow: 0 0 20px rgba(118, 185, 0, 0.5);
         }
 
-        .mic-level {
-            width: 200px;
-            height: 8px;
-            background: rgba(255,255,255,0.1);
-            border-radius: 4px;
+        .mic-visualizer-container {
+            height: 80px;
+            background: rgba(0,0,0,0.3);
+            border-radius: 10px;
+            margin-top: 15px;
             overflow: hidden;
         }
 
-        .mic-level-bar {
+        .mic-visualizer {
+            width: 100%;
             height: 100%;
-            background: linear-gradient(90deg, #76b900, #00d4ff);
-            width: 0%;
-            transition: width 0.1s;
+        }
+
+
+        .stats-pane {
+            background: rgba(0,0,0,0.3);
+            border-radius: 15px;
+            padding: 15px 20px;
+            margin-top: 15px;
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(120px, 1fr));
+            gap: 15px;
+        }
+
+        .stat-item {
+            text-align: center;
+        }
+
+        .stat-value {
+            font-size: 1.2rem;
+            font-weight: 600;
+            color: #76b900;
+            font-family: 'Consolas', 'Monaco', monospace;
+        }
+
+        .stat-label {
+            font-size: 0.75rem;
+            color: #666;
+            text-transform: uppercase;
+            letter-spacing: 0.5px;
+        }
+
+        .preset-buttons {
+            display: flex;
+            gap: 8px;
+            margin-bottom: 8px;
+            flex-wrap: wrap;
+        }
+
+        .preset-btn {
+            padding: 4px 10px;
+            font-size: 0.75rem;
+            background: rgba(255,255,255,0.1);
+            border: 1px solid rgba(255,255,255,0.2);
+            border-radius: 12px;
+            color: #aaa;
+            cursor: pointer;
+            transition: all 0.2s;
+            text-transform: none;
+            letter-spacing: 0;
+        }
+
+        .preset-btn:hover {
+            background: rgba(118, 185, 0, 0.2);
+            border-color: #76b900;
+            color: #fff;
+        }
+
+        .btn-secondary:disabled {
+            opacity: 0.4;
+            cursor: not-allowed;
+            background: rgba(255,255,255,0.05);
+        }
+
+        .btn-secondary:disabled:hover {
+            background: rgba(255,255,255,0.05);
+            transform: none;
         }
 
         @media (max-width: 1200px) {
@@ -358,8 +414,8 @@
 <body>
     <div class="container">
         <header>
-            <h1>PersonaPlex Conference</h1>
-            <p class="subtitle">Two AI personas in conversation - with your participation</p>
+            <h1>DualMind +1</h1>
+            <p class="subtitle">MoshiPlex Edition — Two AI minds in conversation, with your participation</p>
         </header>
 
         <div class="status-bar">
@@ -367,18 +423,13 @@
                 <div class="status-dot" id="connectionStatus"></div>
                 <span id="connectionText">Disconnected</span>
             </div>
-            <div class="status-indicator">
-                <span>🎤</span>
-                <span id="micStatus">Mic Off</span>
-            </div>
         </div>
 
         <div class="conference-grid">
-            <!-- Left Panel - PersonaA (5090) -->
+            <!-- Left Panel - AI Mind A -->
             <div class="persona-panel left">
                 <div class="persona-header">
-                    <span class="persona-name">PersonaA</span>
-                    <span class="gpu-badge">RTX 5090</span>
+                    <span class="persona-name">AI Mind A</span>
                 </div>
                 
                 <div class="visualizer-container">
@@ -390,16 +441,26 @@
                         <div class="config-group">
                             <label>Voice</label>
                             <select id="voiceA">
-                                <option value="NATF1.pt">NATF1 (Natural Female 1)</option>
-                                <option value="NATF2.pt">NATF2 (Natural Female 2)</option>
-                                <option value="NATF3.pt">NATF3 (Natural Female 3)</option>
-                                <option value="NATM1.pt">NATM1 (Natural Male 1)</option>
-                                <option value="NATM2.pt">NATM2 (Natural Male 2)</option>
-                                <option value="NATM3.pt">NATM3 (Natural Male 3)</option>
+                                <option value="NATF1.pt">Sophia</option>
+                                <option value="NATF2.pt">Elena</option>
+                                <option value="NATF3.pt">Maya</option>
+                                <option value="NATM1.pt">Marcus</option>
+                                <option value="NATM2.pt">James</option>
+                                <option value="NATM3.pt">Oliver</option>
                             </select>
                         </div>
                     </div>
                     <div class="config-group">
+                        <label>Personality Presets</label>
+                        <div class="preset-buttons">
+                            <button class="preset-btn" onclick="setPreset('A', 'philosopher')">🤔 Philosopher</button>
+                            <button class="preset-btn" onclick="setPreset('A', 'comedian')">😄 Comedian</button>
+                            <button class="preset-btn" onclick="setPreset('A', 'detective')">🚔 Police Detective</button>
+                            <button class="preset-btn" onclick="setPreset('A', 'robber')">🍬 Candy Robber</button>
+                            <button class="preset-btn" onclick="setPreset('A', 'poet')">✨ Poet</button>
+                            <button class="preset-btn" onclick="setPreset('A', 'mlengineer')">🤖 ML Engineer</button>
+                            <button class="preset-btn" onclick="setPreset('A', 'psychologist')">🧠 Psychologist</button>
+                        </div>
                         <label>System Prompt</label>
                         <textarea id="promptA">You enjoy having a good conversation. You are curious and ask thoughtful questions.</textarea>
                     </div>
@@ -410,11 +471,10 @@
                 </div>
             </div>
 
-            <!-- Right Panel - PersonaB (3090) -->
+            <!-- Right Panel - AI Mind B -->
             <div class="persona-panel right">
                 <div class="persona-header">
-                    <span class="persona-name">PersonaB</span>
-                    <span class="gpu-badge">RTX 3090</span>
+                    <span class="persona-name">AI Mind B</span>
                 </div>
                 
                 <div class="visualizer-container">
@@ -426,16 +486,26 @@
                         <div class="config-group">
                             <label>Voice</label>
                             <select id="voiceB">
-                                <option value="NATM1.pt">NATM1 (Natural Male 1)</option>
-                                <option value="NATM2.pt">NATM2 (Natural Male 2)</option>
-                                <option value="NATM3.pt">NATM3 (Natural Male 3)</option>
-                                <option value="NATF1.pt">NATF1 (Natural Female 1)</option>
-                                <option value="NATF2.pt">NATF2 (Natural Female 2)</option>
-                                <option value="NATF3.pt">NATF3 (Natural Female 3)</option>
+                                <option value="NATM1.pt">Marcus</option>
+                                <option value="NATM2.pt">James</option>
+                                <option value="NATM3.pt">Oliver</option>
+                                <option value="NATF1.pt">Sophia</option>
+                                <option value="NATF2.pt">Elena</option>
+                                <option value="NATF3.pt">Maya</option>
                             </select>
                         </div>
                     </div>
                     <div class="config-group">
+                        <label>Personality Presets</label>
+                        <div class="preset-buttons">
+                            <button class="preset-btn" onclick="setPreset('B', 'philosopher')">🤔 Philosopher</button>
+                            <button class="preset-btn" onclick="setPreset('B', 'comedian')">😄 Comedian</button>
+                            <button class="preset-btn" onclick="setPreset('B', 'detective')">🚔 Police Detective</button>
+                            <button class="preset-btn" onclick="setPreset('B', 'robber')">🍬 Candy Robber</button>
+                            <button class="preset-btn" onclick="setPreset('B', 'poet')">✨ Poet</button>
+                            <button class="preset-btn" onclick="setPreset('B', 'mlengineer')">🤖 ML Engineer</button>
+                            <button class="preset-btn" onclick="setPreset('B', 'psychologist')">🧠 Psychologist</button>
+                        </div>
                         <label>System Prompt</label>
                         <textarea id="promptB">You enjoy having a good conversation. You share interesting stories and perspectives.</textarea>
                     </div>
@@ -448,11 +518,35 @@
         </div>
 
         <div class="user-section">
-            <h3>Your Microphone (Intervene in the conversation)</h3>
-            <div class="mic-indicator">
-                <div class="mic-icon" id="micIcon">🎤</div>
-                <div class="mic-level">
-                    <div class="mic-level-bar" id="micLevelBar"></div>
+            <h3>Your Microphone</h3>
+            <div class="mic-visualizer-container">
+                <canvas class="mic-visualizer" id="visualizerMic"></canvas>
+            </div>
+            
+            <div class="stats-pane">
+                <div class="stat-item">
+                    <div class="stat-value" id="statTime">00:00</div>
+                    <div class="stat-label">Session Time</div>
+                </div>
+                <div class="stat-item">
+                    <div class="stat-value" id="statLevelA">--- dBFS</div>
+                    <div class="stat-label">Mind A Level</div>
+                </div>
+                <div class="stat-item">
+                    <div class="stat-value" id="statLevelB">--- dBFS</div>
+                    <div class="stat-label">Mind B Level</div>
+                </div>
+                <div class="stat-item">
+                    <div class="stat-value" id="statLatency">--</div>
+                    <div class="stat-label">Latency (ms)</div>
+                </div>
+                <div class="stat-item">
+                    <div class="stat-value" id="statFrames">0</div>
+                    <div class="stat-label">Frames</div>
+                </div>
+                <div class="stat-item">
+                    <div class="stat-value" id="statDropped">0</div>
+                    <div class="stat-label">Dropped</div>
                 </div>
             </div>
         </div>
@@ -461,6 +555,7 @@
             <button class="btn-primary" id="startBtn">Start Conference</button>
             <button class="btn-danger" id="stopBtn" style="display: none;">End Conference</button>
             <button class="btn-secondary" id="clearBtn">Clear Text</button>
+            <button class="btn-secondary" id="downloadBtn" disabled>Download Recording</button>
         </div>
     </div>
 

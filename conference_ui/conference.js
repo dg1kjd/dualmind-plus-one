@@ -1,6 +1,6 @@
 /**
- * PersonaPlex Conference Client
- * Handles WebSocket communication, audio processing, and visualization
+ * DualMind - MoshiPlex Edition
+ * Real-time dual AI conversation interface
  * 
  * Audio architecture:
  * - Browser runs at native sample rate (typically 48kHz) - this is the timing master
@@ -8,6 +8,31 @@
  * - Decoder worker handles server audio (decodes from 24kHz, resamples to browser rate)
  * - No explicit resampling needed in our code - Opus handles it transparently
  */
+
+// Personality presets
+const PRESETS = {
+    philosopher: "You are a deep thinker who loves exploring existential questions. You often quote philosophers and challenge assumptions. You find meaning in paradoxes and enjoy Socratic dialogue.",
+    comedian: "You are a witty comedian who finds humor in everything. You love puns, wordplay, and absurdist observations. You keep the mood light but can be surprisingly insightful.",
+    detective: "You are a grizzled police detective investigating a candy theft. A little girl reported her lollipop stolen. You have a prime suspect and you're going to get to the bottom of this. You take this case VERY seriously, using intense interrogation tactics for this heinous crime.",
+    robber: "You are a sneaky but not very bright candy thief. You definitely stole that little girl's lollipop but you're trying to act innocent. You're bad at lying - you keep accidentally revealing incriminating details. You get defensive and make increasingly absurd excuses.",
+    poet: "You are a romantic soul who sees beauty everywhere. You speak in metaphors and occasionally break into verse. You're deeply emotional and find poetry in mundane moments.",
+    mlengineer: "You are an ML engineer obsessed with transformers and gradient descent. You relate everything to neural networks and loss functions. You complain about GPU memory, CUDA errors, and training instability. You casually drop terms like 'attention heads' and 'batch normalization' into conversation.",
+    psychologist: "You are a practicing psychologist who can't stop analyzing everyone. You ask probing questions about childhood and feelings. You say 'and how does that make you feel?' a lot. You take notes and occasionally say 'mmhmm, interesting' while nodding thoughtfully."
+};
+
+// Global preset setter
+function setPreset(persona, presetName) {
+    const preset = PRESETS[presetName];
+    if (preset) {
+        const textarea = document.getElementById(`prompt${persona}`);
+        if (textarea) {
+            textarea.value = preset;
+            if (window.conferenceClient) {
+                window.conferenceClient.updateConfig();
+            }
+        }
+    }
+}
 
 class ConferenceClient {
     constructor() {
@@ -32,9 +57,30 @@ class ConferenceClient {
         // Visualization
         this.animationFrame = null;
         this.analyser = null;
+        this.micAnalyser = null;
         this.frequencyData = null;
+        this.micFrequencyData = null;
         this.visualizerDataA = new Float32Array(64);
         this.visualizerDataB = new Float32Array(64);
+        this.visualizerDataMic = new Float32Array(64);
+        
+        // Stats tracking
+        this.stats = {
+            startTime: null,
+            frames: 0,
+            dropped: 0,
+            lastPingTime: 0,
+            latency: 0
+        };
+        this.statsInterval = null;
+        
+        // Recording buffers (Float32Arrays accumulated during session)
+        this.recordingBuffers = {
+            mixedAudio: [],   // Combined A+B for playback channel
+            micAudio: []      // Mic input
+        };
+        this.recordingSampleRate = 48000; // Will be set from audioContext
+        this.hasRecording = false;
         
         this.initElements();
         this.initEventListeners();
@@ -45,9 +91,6 @@ class ConferenceClient {
         this.elements = {
             connectionStatus: document.getElementById('connectionStatus'),
             connectionText: document.getElementById('connectionText'),
-            micStatus: document.getElementById('micStatus'),
-            micIcon: document.getElementById('micIcon'),
-            micLevelBar: document.getElementById('micLevelBar'),
             voiceA: document.getElementById('voiceA'),
             voiceB: document.getElementById('voiceB'),
             promptA: document.getElementById('promptA'),
@@ -59,6 +102,15 @@ class ConferenceClient {
             clearBtn: document.getElementById('clearBtn'),
             visualizerA: document.getElementById('visualizerA'),
             visualizerB: document.getElementById('visualizerB'),
+            visualizerMic: document.getElementById('visualizerMic'),
+            // Stats elements
+            statTime: document.getElementById('statTime'),
+            statLevelA: document.getElementById('statLevelA'),
+            statLevelB: document.getElementById('statLevelB'),
+            statLatency: document.getElementById('statLatency'),
+            statFrames: document.getElementById('statFrames'),
+            statDropped: document.getElementById('statDropped'),
+            downloadBtn: document.getElementById('downloadBtn'),
         };
     }
     
@@ -66,6 +118,7 @@ class ConferenceClient {
         this.elements.startBtn.addEventListener('click', () => this.start());
         this.elements.stopBtn.addEventListener('click', () => this.stop());
         this.elements.clearBtn.addEventListener('click', () => this.clearText());
+        this.elements.downloadBtn.addEventListener('click', () => this.downloadRecording());
         
         // Config changes
         this.elements.voiceA.addEventListener('change', () => this.updateConfig());
@@ -76,18 +129,23 @@ class ConferenceClient {
         // Setup canvas contexts
         this.ctxA = this.elements.visualizerA.getContext('2d');
         this.ctxB = this.elements.visualizerB.getContext('2d');
+        this.ctxMic = this.elements.visualizerMic.getContext('2d');
         
         // Resize canvases
         const resizeCanvas = (canvas) => {
-            canvas.width = canvas.offsetWidth * window.devicePixelRatio;
-            canvas.height = canvas.offsetHeight * window.devicePixelRatio;
+            if (canvas) {
+                canvas.width = canvas.offsetWidth * window.devicePixelRatio;
+                canvas.height = canvas.offsetHeight * window.devicePixelRatio;
+            }
         };
         resizeCanvas(this.elements.visualizerA);
         resizeCanvas(this.elements.visualizerB);
+        resizeCanvas(this.elements.visualizerMic);
         
         window.addEventListener('resize', () => {
             resizeCanvas(this.elements.visualizerA);
             resizeCanvas(this.elements.visualizerB);
+            resizeCanvas(this.elements.visualizerMic);
         });
         
         this.startVisualizerLoop();
@@ -97,15 +155,73 @@ class ConferenceClient {
         const draw = () => {
             // Update from real spectrum data
             this.updateVisualizersFromSpectrum();
+            this.updateMicVisualizer();
             
             this.drawVisualizer(this.ctxA, this.elements.visualizerA, this.visualizerDataA, '#76b900');
             this.drawVisualizer(this.ctxB, this.elements.visualizerB, this.visualizerDataB, '#00d4ff');
+            this.drawVisualizer(this.ctxMic, this.elements.visualizerMic, this.visualizerDataMic, '#ff9500');
             this.animationFrame = requestAnimationFrame(draw);
         };
         draw();
     }
     
+    updateMicVisualizer() {
+        if (!this.micAnalyser || !this.micFrequencyData) return;
+        
+        this.micAnalyser.getByteFrequencyData(this.micFrequencyData);
+        
+        const binsPerBar = Math.floor(this.micFrequencyData.length / 64);
+        
+        for (let i = 0; i < 64; i++) {
+            let sum = 0;
+            for (let j = 0; j < binsPerBar; j++) {
+                sum += this.micFrequencyData[i * binsPerBar + j];
+            }
+            const normalizedValue = (sum / binsPerBar) / 255;
+            this.visualizerDataMic[i] = Math.max(this.visualizerDataMic[i] * 0.85, normalizedValue);
+        }
+    }
+    
+    updateStats() {
+        if (!this.stats.startTime) return;
+        
+        // Session time
+        const elapsed = Math.floor((Date.now() - this.stats.startTime) / 1000);
+        const mins = Math.floor(elapsed / 60).toString().padStart(2, '0');
+        const secs = (elapsed % 60).toString().padStart(2, '0');
+        this.elements.statTime.textContent = `${mins}:${secs}`;
+        
+        // Levels in dBFS (20 * log10(level), clamped to reasonable range)
+        this.elements.statLevelA.textContent = this.levelToDbfs(this.levelA);
+        this.elements.statLevelB.textContent = this.levelToDbfs(this.levelB);
+        
+        // Latency
+        this.elements.statLatency.textContent = this.stats.latency > 0 ? this.stats.latency : '--';
+        
+        // Frames
+        this.elements.statFrames.textContent = this.stats.frames;
+        this.elements.statDropped.textContent = this.stats.dropped;
+    }
+    
+    levelToDbfs(level) {
+        if (level <= 0.0001) return '--- dBFS';
+        const dbfs = 20 * Math.log10(level);
+        // Clamp to reasonable display range
+        const clamped = Math.max(-60, Math.min(0, dbfs));
+        return `${clamped.toFixed(0)} dBFS`;
+    }
+    
+    resetStatsDisplay() {
+        this.elements.statTime.textContent = '00:00';
+        this.elements.statLevelA.textContent = '--- dBFS';
+        this.elements.statLevelB.textContent = '--- dBFS';
+        this.elements.statLatency.textContent = '--';
+        this.elements.statFrames.textContent = '0';
+        this.elements.statDropped.textContent = '0';
+    }
+    
     drawVisualizer(ctx, canvas, data, color) {
+        if (!ctx || !canvas) return;
         const width = canvas.width;
         const height = canvas.height;
         const barCount = data.length;
@@ -231,6 +347,9 @@ class ConferenceClient {
                         console.log('[DECODE] Decoded samples:', samplesCopy.length, 'count:', this.decodeCount);
                     }
                     
+                    // Record the mixed audio (A+B combined from server)
+                    this.recordingBuffers.mixedAudio.push(new Float32Array(samplesCopy));
+                    
                     this.playbackWorklet.port.postMessage({
                         type: 'audio',
                         samples: samplesCopy
@@ -249,6 +368,21 @@ class ConferenceClient {
             console.log('Starting recorder...');
             this.recorder.start();
             
+            // Setup mic analyzer after recorder starts (needs the media stream)
+            await this.setupMicAnalyser();
+            
+            // Start stats tracking
+            this.stats.startTime = Date.now();
+            this.stats.frames = 0;
+            this.stats.dropped = 0;
+            this.statsInterval = setInterval(() => this.updateStats(), 100);
+            
+            // Clear recording buffers for new session
+            this.recordingBuffers = { mixedAudio: [], micAudio: [] };
+            this.recordingSampleRate = this.audioContext.sampleRate; // Use actual browser sample rate
+            this.hasRecording = false;
+            this.elements.downloadBtn.disabled = true;
+            
             this.elements.startBtn.style.display = 'none';
             this.elements.stopBtn.style.display = 'inline-block';
             this.isRunning = true;
@@ -257,6 +391,20 @@ class ConferenceClient {
             console.error('Failed to start conference:', error);
             this.updateStatus('disconnected');
             alert('Failed to start: ' + error.message);
+        }
+    }
+    
+    async setupMicAnalyser() {
+        // Setup analyser for mic spectrum visualization
+        if (this.mediaStream) {
+            this.micAnalyser = this.audioContext.createAnalyser();
+            this.micAnalyser.fftSize = 256;
+            this.micAnalyser.smoothingTimeConstant = 0.7;
+            this.micFrequencyData = new Uint8Array(this.micAnalyser.frequencyBinCount);
+            
+            // Connect mic source to analyser
+            const analyserSource = this.audioContext.createMediaStreamSource(this.mediaStream);
+            analyserSource.connect(this.micAnalyser);
         }
     }
     
@@ -291,17 +439,19 @@ class ConferenceClient {
     async initRecorder() {
         return new Promise(async (resolve, reject) => {
             try {
+                // Get mic stream for spectrum analyzer
+                this.mediaStream = await navigator.mediaDevices.getUserMedia({
+                    audio: {
+                        channelCount: 1,
+                        echoCancellation: true,
+                        noiseSuppression: true,
+                        autoGainControl: true,
+                    }
+                });
+                
                 // opus-recorder handles resampling from browser rate to 24kHz internally
-                // mediaTrackConstraints tells Recorder to get mic access
                 const recorderOptions = {
-                    mediaTrackConstraints: {
-                        audio: {
-                            channelCount: 1,
-                            echoCancellation: true,
-                            noiseSuppression: true,
-                            autoGainControl: true,
-                        }
-                    },
+                    sourceNode: this.audioContext.createMediaStreamSource(this.mediaStream),
                     encoderPath: 'encoderWorker.min.js',
                     bufferLength: Math.round(960 * this.audioContext.sampleRate / 24000),
                     encoderFrameSize: 20,      // 20ms frames
@@ -318,7 +468,7 @@ class ConferenceClient {
                 this.recorder = new Recorder(recorderOptions);
                 
                 this.recorder.ondataavailable = (opusData) => {
-                    // Send Opus data to server
+                    // Send opus data to server
                     if (this.ws && this.ws.readyState === WebSocket.OPEN) {
                         const message = new Uint8Array(1 + opusData.length);
                         message[0] = 0x01; // Audio type
@@ -329,8 +479,6 @@ class ConferenceClient {
                 
                 this.recorder.onstart = () => {
                     console.log('Recorder started');
-                    this.elements.micStatus.textContent = 'Mic Active';
-                    this.elements.micIcon.classList.add('active');
                 };
                 
                 this.recorder.onstop = () => {
@@ -468,6 +616,9 @@ class ConferenceClient {
             this.levelA = levels.level_a || 0;
             this.levelB = levels.level_b || 0;
             // Levels are used by updateVisualizersFromSpectrum() to scale the real spectrum
+            
+            // Track frames for stats
+            this.stats.frames++;
         } catch (e) {
             console.error('Failed to parse levels:', e);
         }
@@ -492,11 +643,21 @@ class ConferenceClient {
     }
     
     stop() {
+        // Stop stats interval
+        if (this.statsInterval) {
+            clearInterval(this.statsInterval);
+            this.statsInterval = null;
+        }
+        
         // Stop recorder
         if (this.recorder) {
             try { this.recorder.stop(); } catch (e) {}
             this.recorder = null;
         }
+        
+        // Clean up mic analyser
+        this.micAnalyser = null;
+        this.micFrequencyData = null;
         
         // Terminate decoder worker
         if (this.decoderWorker) {
@@ -517,15 +678,25 @@ class ConferenceClient {
         }
         
         this.playbackWorklet = null;
+        this.analyser = null;
+        this.frequencyData = null;
         this.isRunning = false;
         this.isConnected = false;
         this.updateStatus('disconnected');
         
+        // Enable download if we have recording data
+        if (this.recordingBuffers.mixedAudio.length > 0) {
+            this.hasRecording = true;
+            this.elements.downloadBtn.disabled = false;
+        }
+        
+        // Reset stats display
+        this.levelA = 0;
+        this.levelB = 0;
+        this.resetStatsDisplay();
+        
         this.elements.startBtn.style.display = 'inline-block';
         this.elements.stopBtn.style.display = 'none';
-        this.elements.micStatus.textContent = 'Mic Off';
-        this.elements.micIcon.classList.remove('active');
-        this.elements.micLevelBar.style.width = '0%';
     }
     
     clearText() {
@@ -559,6 +730,111 @@ class ConferenceClient {
         const div = document.createElement('div');
         div.textContent = text;
         return div.innerHTML;
+    }
+    
+    async downloadRecording() {
+        if (!this.hasRecording || this.recordingBuffers.mixedAudio.length === 0) {
+            alert('No recording available');
+            return;
+        }
+        
+        // Concatenate all audio chunks
+        const totalLength = this.recordingBuffers.mixedAudio.reduce((sum, chunk) => sum + chunk.length, 0);
+        const mixedAudio = new Float32Array(totalLength);
+        let offset = 0;
+        for (const chunk of this.recordingBuffers.mixedAudio) {
+            mixedAudio.set(chunk, offset);
+            offset += chunk.length;
+        }
+        
+        // Create stereo WAV file (mixed audio on both channels)
+        // Opus in browser is complex; WAV is universally supported
+        console.log('Creating WAV with sample rate:', this.recordingSampleRate, 'samples:', totalLength);
+        const wavBlob = this.createWavBlob(mixedAudio, this.recordingSampleRate);
+        
+        // Use showSaveFilePicker if available, otherwise fallback to download link
+        const filename = `dualmind-recording-${new Date().toISOString().slice(0,19).replace(/[:-]/g, '')}.wav`;
+        
+        if ('showSaveFilePicker' in window) {
+            try {
+                const handle = await window.showSaveFilePicker({
+                    suggestedName: filename,
+                    types: [{
+                        description: 'WAV Audio',
+                        accept: { 'audio/wav': ['.wav'] }
+                    }]
+                });
+                const writable = await handle.createWritable();
+                await writable.write(wavBlob);
+                await writable.close();
+                console.log('Recording saved via File System Access API');
+                return;
+            } catch (e) {
+                if (e.name !== 'AbortError') {
+                    console.warn('File picker failed, falling back to download:', e);
+                } else {
+                    return; // User cancelled
+                }
+            }
+        }
+        
+        // Fallback: create download link
+        const url = URL.createObjectURL(wavBlob);
+        const a = document.createElement('a');
+        a.href = url;
+        a.download = filename;
+        document.body.appendChild(a);
+        a.click();
+        document.body.removeChild(a);
+        URL.revokeObjectURL(url);
+    }
+    
+    createWavBlob(samples, sampleRate) {
+        // Create stereo WAV (same audio on both channels)
+        const numChannels = 2;
+        const bytesPerSample = 2; // 16-bit
+        const blockAlign = numChannels * bytesPerSample;
+        const byteRate = sampleRate * blockAlign;
+        const dataSize = samples.length * numChannels * bytesPerSample;
+        const bufferSize = 44 + dataSize;
+        
+        const buffer = new ArrayBuffer(bufferSize);
+        const view = new DataView(buffer);
+        
+        // WAV header
+        const writeString = (offset, str) => {
+            for (let i = 0; i < str.length; i++) {
+                view.setUint8(offset + i, str.charCodeAt(i));
+            }
+        };
+        
+        writeString(0, 'RIFF');
+        view.setUint32(4, bufferSize - 8, true);
+        writeString(8, 'WAVE');
+        writeString(12, 'fmt ');
+        view.setUint32(16, 16, true); // fmt chunk size
+        view.setUint16(20, 1, true);  // PCM format
+        view.setUint16(22, numChannels, true);
+        view.setUint32(24, sampleRate, true);
+        view.setUint32(28, byteRate, true);
+        view.setUint16(32, blockAlign, true);
+        view.setUint16(34, bytesPerSample * 8, true);
+        writeString(36, 'data');
+        view.setUint32(40, dataSize, true);
+        
+        // Write interleaved stereo samples
+        let dataOffset = 44;
+        for (let i = 0; i < samples.length; i++) {
+            const sample = Math.max(-1, Math.min(1, samples[i]));
+            const intSample = sample < 0 ? sample * 0x8000 : sample * 0x7FFF;
+            // Left channel
+            view.setInt16(dataOffset, intSample, true);
+            // Right channel (same as left)
+            view.setInt16(dataOffset + 2, intSample, true);
+            dataOffset += 4;
+        }
+        
+        return new Blob([buffer], { type: 'audio/wav' });
     }
 }
 
