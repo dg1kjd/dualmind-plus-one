@@ -1,3 +1,9 @@
+// Title: DualMind+1 Moshi Edition Audio Processor
+// Description: This script processes audio streams for DualMind+1 Moshi Edition, handling encoding and decoding of audio data for real-time conferencing.
+// Author: Jens David
+// Copyright: 2026 Jens David Consulting
+// License: MIT
+
 /**
  * Conference Audio Playback Worklet
  * Handles decoded audio playback from server

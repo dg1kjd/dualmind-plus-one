@@ -1,3 +1,9 @@
+// Title: DualMind+1 Moshi Edition Conference Interface
+// Description: This script manages the real-time audio conferencing interface for DualMind+1 Moshi Edition, handling user interactions and audio stream coordination.
+// Author: Jens David
+// Copyright: 2026 Jens David Consulting
+// License: MIT
+
 /**
  * DualMind - MoshiPlex Edition
  * Real-time dual AI conversation interface
@@ -18,6 +24,31 @@ const PRESETS = {
     poet: "You are a romantic soul who sees beauty everywhere. You speak in metaphors and occasionally break into verse. You're deeply emotional and find poetry in mundane moments.",
     mlengineer: "You are an ML engineer obsessed with transformers and gradient descent. You relate everything to neural networks and loss functions. You complain about GPU memory, CUDA errors, and training instability. You casually drop terms like 'attention heads' and 'batch normalization' into conversation.",
     psychologist: "You are a practicing psychologist who can't stop analyzing everyone. You ask probing questions about childhood and feelings. You say 'and how does that make you feel?' a lot. You take notes and occasionally say 'mmhmm, interesting' while nodding thoughtfully."
+};
+
+// Determine base path dynamically so reverse-proxied deployments under /suburl/ work.
+const BASE_PATH = (() => {
+    const { pathname } = window.location;
+    if (pathname.endsWith('/')) {
+        return pathname;
+    }
+    const segments = pathname.split('/');
+    segments.pop();
+    let base = segments.join('/') || '/';
+    if (!base.endsWith('/')) {
+        base += '/';
+    }
+    return base;
+})();
+
+const resolvePath = (relativePath) => {
+    if (/^[a-zA-Z][a-zA-Z0-9+.-]*:/.test(relativePath)) {
+        return relativePath; // Already absolute (http:, https:, etc.)
+    }
+    if (relativePath.startsWith('/')) {
+        return relativePath; // Absolute on current origin
+    }
+    return BASE_PATH + relativePath;
 };
 
 // Global preset setter
@@ -302,7 +333,7 @@ class ConferenceClient {
             await this.initDecoder();
             
             // Setup playback worklet with spectrum analyser
-            await this.audioContext.audioWorklet.addModule('audio-processor.js');
+            await this.audioContext.audioWorklet.addModule(resolvePath('audio-processor.js'));
             this.playbackWorklet = new AudioWorkletNode(this.audioContext, 'conference-processor');
             
             // Create analyser for real spectrum visualization
@@ -410,7 +441,7 @@ class ConferenceClient {
     
     async initDecoder() {
         return new Promise((resolve, reject) => {
-            this.decoderWorker = new Worker('assets/decoderWorker.min.js');
+            this.decoderWorker = new Worker(resolvePath('assets/decoderWorker.min.js'));
             
             this.decoderWorker.onerror = (e) => {
                 console.error('Decoder worker error:', e);
@@ -452,7 +483,7 @@ class ConferenceClient {
                 // opus-recorder handles resampling from browser rate to 24kHz internally
                 const recorderOptions = {
                     sourceNode: this.audioContext.createMediaStreamSource(this.mediaStream),
-                    encoderPath: 'encoderWorker.min.js',
+                    encoderPath: resolvePath('encoderWorker.min.js'),
                     bufferLength: Math.round(960 * this.audioContext.sampleRate / 24000),
                     encoderFrameSize: 20,      // 20ms frames
                     encoderSampleRate: 24000,  // Opus encodes at 24kHz
@@ -505,7 +536,8 @@ class ConferenceClient {
                 prompt_b: this.elements.promptB.value,
             });
             
-            const url = `${protocol}//${host}/api/conference?${params}`;
+            const wsPath = `${BASE_PATH}api/conference`;
+            const url = `${protocol}//${host}${wsPath}?${params}`;
             console.log('Connecting to:', url);
             
             this.ws = new WebSocket(url);

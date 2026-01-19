@@ -1,3 +1,9 @@
+// Title: DualMind+1 Moshi Edition Client Audio Processor
+// Description: This module handles audio processing for the DualMind+1 Moshi Edition client, including encoding and decoding audio streams for user interaction.
+// Author: Jens David
+// Copyright: 2026 Jens David Consulting
+// License: MIT
+
 // @ts-nocheck
 function asMs(samples) {
   return (samples * 1000 / sampleRate).toFixed(1);

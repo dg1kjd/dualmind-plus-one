@@ -1,3 +1,9 @@
+# Title: DualMind+1 Moshi Edition Offline Processing
+# Description: This module provides offline processing capabilities for DualMind+1 Moshi Edition, including model warmup and audio handling for non-real-time scenarios.
+# Author: Jens David
+# Copyright: 2026 Jens David Consulting
+# License: MIT
+
 # SPDX-FileCopyrightText: Copyright (c) 2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 # SPDX-License-Identifier: MIT
 #

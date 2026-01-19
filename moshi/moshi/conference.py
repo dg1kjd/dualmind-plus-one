@@ -1,7 +1,13 @@
+# Title: DualMind+1 Moshi Edition Conference Server
+# Description: This module implements a conference server for DualMind+1 Moshi Edition, allowing two instances to communicate with each other while enabling user monitoring and intervention. It handles audio transfer and processing between processes.
+# Author: Jens David
+# Copyright: 2026 Jens David Consulting
+# License: MIT
+
 # SPDX-FileCopyrightText: Copyright (c) 2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 # SPDX-License-Identifier: MIT
 """
-PersonaPlex Conference Server
+DualMind+1 Moshi Edition Conference Server
 
 Two PersonaPlex instances talking to each other, with user able to monitor and intervene.
 - Left (GPU 0): PersonaPlex A
@@ -911,7 +917,7 @@ def main():
     # Use 'spawn' for proper CUDA context isolation in worker processes
     mp.set_start_method('spawn', force=True)
     
-    parser = argparse.ArgumentParser(description="PersonaPlex Conference Server")
+    parser = argparse.ArgumentParser(description="DualMind+1 Moshi Edition Conference Server")
     parser.add_argument("--host", default="0.0.0.0", type=str)
     parser.add_argument("--port", default=8999, type=int)
     parser.add_argument("--device-a", type=str, default="cuda:0", help="Device for PersonaA (default: cuda:0)")
