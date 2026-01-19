@@ -535,6 +535,15 @@ class ConferenceServer:
         voice_b = request.query.get("voice_b", "NATM1.pt")
         prompt_a = request.query.get("prompt_a", "You enjoy having a good conversation.")
         prompt_b = request.query.get("prompt_b", "You enjoy having a good conversation.")
+        disabled_a = request.query.get("disabled_a", "0") in ("1", "true", "True")
+        disabled_b = request.query.get("disabled_b", "0") in ("1", "true", "True")
+        persona_a_enabled = not disabled_a
+        persona_b_enabled = not disabled_b
+
+        if not persona_a_enabled and not persona_b_enabled:
+            clog.log("error", "Client requested conference with no active personas")
+            await ws.close(code=aiohttp.WSCloseCode.PROTOCOL_ERROR, message=b"No personas enabled")
+            return ws
         
         close = False
         user_opus_reader = sphn.OpusStreamReader(self.sample_rate)
@@ -573,9 +582,9 @@ class ConferenceServer:
                     elif kind == 10:  # Config update
                         try:
                             config = json.loads(data[1:].decode('utf-8'))
-                            if 'voice_a' in config:
+                            if 'voice_a' in config and persona_a_enabled and not config.get('disabled_a'):
                                 self.persona_a.ctrl_queue.put(("config", config['voice_a'], config.get('prompt_a', '')))
-                            if 'voice_b' in config:
+                            if 'voice_b' in config and persona_b_enabled and not config.get('disabled_b'):
                                 self.persona_b.ctrl_queue.put(("config", config['voice_b'], config.get('prompt_b', '')))
                         except Exception as e:
                             logger.error(f"[recv_loop] Config error: {e}")
@@ -662,36 +671,49 @@ class ConferenceServer:
                     
                     # To A: user + B (A hears user and B)
                     mix_for_a = np.zeros(self.frame_size, dtype=np.float32)
-                    b_len = min(len(b_output), self.frame_size)
-                    user_len = min(len(user_frame), self.frame_size)
-                    if b_len > 0:
-                        mix_for_a[:b_len] = 0.5 * b_output[:b_len]
-                    if user_len > 0:
-                        mix_for_a[:user_len] += 0.5 * user_frame[:user_len]
+                    if persona_a_enabled:
+                        b_len = min(len(b_output), self.frame_size)
+                        user_len = min(len(user_frame), self.frame_size)
+                        if persona_b_enabled and b_len > 0:
+                            mix_for_a[:b_len] = 0.5 * b_output[:b_len]
+                        if user_len > 0:
+                            user_gain = 0.5 if persona_b_enabled else 1.0
+                            mix_for_a[:user_len] += user_gain * user_frame[:user_len]
                     
                     # To B: user + A (B hears user and A)
                     mix_for_b = np.zeros(self.frame_size, dtype=np.float32)
-                    a_len = min(len(a_output), self.frame_size)
-                    if a_len > 0:
-                        mix_for_b[:a_len] = 0.5 * a_output[:a_len]
-                    if user_len > 0:
-                        mix_for_b[:user_len] += 0.5 * user_frame[:user_len]
+                    if persona_b_enabled:
+                        a_len = min(len(a_output), self.frame_size)
+                        user_len = min(len(user_frame), self.frame_size)
+                        if persona_a_enabled and a_len > 0:
+                            mix_for_b[:a_len] = 0.5 * a_output[:a_len]
+                        if user_len > 0:
+                            user_gain = 0.5 if persona_a_enabled else 1.0
+                            mix_for_b[:user_len] += user_gain * user_frame[:user_len]
                     
                     # === Write to shared memory and signal workers ===
-                    self.persona_a.input_buffer.write(mix_for_a)
-                    self.persona_b.input_buffer.write(mix_for_b)
-                    self.persona_a.ctrl_queue.put(("frame_ready",))
-                    self.persona_b.ctrl_queue.put(("frame_ready",))
+                    if persona_a_enabled:
+                        self.persona_a.input_buffer.write(mix_for_a)
+                        self.persona_a.ctrl_queue.put(("frame_ready",))
+                    else:
+                        a_output = silence.copy()
+                        a_level = 0.0
+                    if persona_b_enabled:
+                        self.persona_b.input_buffer.write(mix_for_b)
+                        self.persona_b.ctrl_queue.put(("frame_ready",))
+                    else:
+                        b_output = silence.copy()
+                        b_level = 0.0
                     
                     # === Wait for both workers to complete (with timeout) ===
-                    a_done = False
-                    b_done = False
+                    a_done = not persona_a_enabled
+                    b_done = not persona_b_enabled
                     wait_start = time.time()
                     timeout = 0.2  # 200ms timeout per frame
                     
                     while (not a_done or not b_done) and (time.time() - wait_start < timeout):
                         # Check A
-                        if not a_done:
+                        if persona_a_enabled and not a_done:
                             try:
                                 msg = self.persona_a.status_queue.get_nowait()
                                 if msg[0] == "output_ready":
@@ -712,7 +734,7 @@ class ConferenceServer:
                                 pass
                         
                         # Check B
-                        if not b_done:
+                        if persona_b_enabled and not b_done:
                             try:
                                 msg = self.persona_b.status_queue.get_nowait()
                                 if msg[0] == "output_ready":
@@ -737,12 +759,16 @@ class ConferenceServer:
                     
                     # === Mix for user output: A + B ===
                     mix_for_user = np.zeros(self.frame_size, dtype=np.float32)
-                    a_len = min(len(a_output), self.frame_size)
-                    b_len = min(len(b_output), self.frame_size)
-                    if a_len > 0:
-                        mix_for_user[:a_len] += 0.5 * a_output[:a_len]
-                    if b_len > 0:
-                        mix_for_user[:b_len] += 0.5 * b_output[:b_len]
+                    contributors = (1 if persona_a_enabled else 0) + (1 if persona_b_enabled else 0)
+                    gain = 1.0 / max(1, contributors)
+                    if persona_a_enabled:
+                        a_len = min(len(a_output), self.frame_size)
+                        if a_len > 0:
+                            mix_for_user[:a_len] += gain * a_output[:a_len]
+                    if persona_b_enabled:
+                        b_len = min(len(b_output), self.frame_size)
+                        if b_len > 0:
+                            mix_for_user[:b_len] += gain * b_output[:b_len]
                     
                     # === Send to user output queue ===
                     try:
@@ -829,37 +855,48 @@ class ConferenceServer:
             
             # Configure and reset workers
             clog.log("info", "Configuring personas...")
-            self.persona_a.ctrl_queue.put(("config", voice_a, prompt_a))
-            self.persona_b.ctrl_queue.put(("config", voice_b, prompt_b))
-            self.persona_a.ctrl_queue.put(("reset",))
-            self.persona_b.ctrl_queue.put(("reset",))
+            if persona_a_enabled:
+                self.persona_a.ctrl_queue.put(("config", voice_a, prompt_a))
+                self.persona_a.ctrl_queue.put(("reset",))
+            if persona_b_enabled:
+                self.persona_b.ctrl_queue.put(("config", voice_b, prompt_b))
+                self.persona_b.ctrl_queue.put(("reset",))
             
             # Process system prompts in workers
             clog.log("info", "Processing system prompts...")
-            self.persona_a.ctrl_queue.put(("system_prompts",))
-            self.persona_b.ctrl_queue.put(("system_prompts",))
+            expected_prompts = 0
+            if persona_a_enabled:
+                self.persona_a.ctrl_queue.put(("system_prompts",))
+                expected_prompts += 1
+            if persona_b_enabled:
+                self.persona_b.ctrl_queue.put(("system_prompts",))
+                expected_prompts += 1
             
             # Wait for both to finish
             prompts_done = 0
             timeout = time.time() + 60.0
-            while prompts_done < 2 and time.time() < timeout:
-                try:
-                    msg = self.persona_a.status_queue.get_nowait()
-                    if msg[0] == "system_prompts_done":
-                        prompts_done += 1
-                        clog.log("info", "PersonaA system prompts done")
-                except:
-                    pass
-                try:
-                    msg = self.persona_b.status_queue.get_nowait()
-                    if msg[0] == "system_prompts_done":
-                        prompts_done += 1
-                        clog.log("info", "PersonaB system prompts done")
-                except:
-                    pass
+            while prompts_done < expected_prompts and time.time() < timeout:
+                if persona_a_enabled:
+                    try:
+                        msg = self.persona_a.status_queue.get_nowait()
+                        if msg[0] == "system_prompts_done":
+                            prompts_done += 1
+                            clog.log("info", "PersonaA system prompts done")
+                            persona_a_enabled = True
+                    except:
+                        pass
+                if persona_b_enabled:
+                    try:
+                        msg = self.persona_b.status_queue.get_nowait()
+                        if msg[0] == "system_prompts_done":
+                            prompts_done += 1
+                            clog.log("info", "PersonaB system prompts done")
+                            persona_b_enabled = True
+                    except:
+                        pass
                 await asyncio.sleep(0.01)
             
-            if prompts_done < 2:
+            if expected_prompts > 0 and prompts_done < expected_prompts:
                 logger.error("Timeout waiting for system prompts")
             
             # Send handshake

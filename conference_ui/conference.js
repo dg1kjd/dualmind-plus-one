@@ -51,8 +51,18 @@ const resolvePath = (relativePath) => {
     return BASE_PATH + relativePath;
 };
 
+const DISABLED_VOICE_VALUE = '__disabled__';
+
 // Global preset setter
 function setPreset(persona, presetName) {
+    const voiceSelect = document.getElementById(`voice${persona}`);
+    const textarea = document.getElementById(`prompt${persona}`);
+    if (voiceSelect && voiceSelect.value === DISABLED_VOICE_VALUE) {
+        return;
+    }
+    if (textarea && textarea.disabled) {
+        return;
+    }
     const preset = PRESETS[presetName];
     if (preset) {
         const textarea = document.getElementById(`prompt${persona}`);
@@ -94,7 +104,15 @@ class ConferenceClient {
         this.visualizerDataA = new Float32Array(64);
         this.visualizerDataB = new Float32Array(64);
         this.visualizerDataMic = new Float32Array(64);
-        
+        this.personaPanels = {
+            A: document.querySelector('[data-persona-panel="A"]'),
+            B: document.querySelector('[data-persona-panel="B"]'),
+        };
+        this.presetContainers = {
+            A: document.querySelector('[data-persona-buttons="A"]'),
+            B: document.querySelector('[data-persona-buttons="B"]'),
+        };
+
         // Stats tracking
         this.stats = {
             startTime: null,
@@ -116,6 +134,8 @@ class ConferenceClient {
         this.initElements();
         this.initEventListeners();
         this.initVisualizers();
+        this.refreshPersonaState('A');
+        this.refreshPersonaState('B');
     }
     
     initElements() {
@@ -152,8 +172,14 @@ class ConferenceClient {
         this.elements.downloadBtn.addEventListener('click', () => this.downloadRecording());
         
         // Config changes
-        this.elements.voiceA.addEventListener('change', () => this.updateConfig());
-        this.elements.voiceB.addEventListener('change', () => this.updateConfig());
+        this.elements.voiceA.addEventListener('change', () => {
+            this.refreshPersonaState('A');
+            this.updateConfig();
+        });
+        this.elements.voiceB.addEventListener('change', () => {
+            this.refreshPersonaState('B');
+            this.updateConfig();
+        });
     }
     
     initVisualizers() {
@@ -320,12 +346,22 @@ class ConferenceClient {
     }
     
     async start() {
+        const disabledA = this.isPersonaDisabled('A');
+        const disabledB = this.isPersonaDisabled('B');
+        if (disabledA && disabledB) {
+            alert('Please enable at least one AI mind before starting.');
+            return;
+        }
         try {
             this.updateStatus('connecting');
             
             // Initialize audio context at browser's native rate (timing master)
             // No sample rate specified - uses system default (typically 48kHz)
-            this.audioContext = new AudioContext();
+            const AudioCtx = window.AudioContext || window.webkitAudioContext;
+            if (!AudioCtx) {
+                throw new Error('AudioContext is not supported in this browser.');
+            }
+            this.audioContext = new AudioCtx();
             await this.audioContext.resume();
             console.log('AudioContext sample rate:', this.audioContext.sampleRate);
             
@@ -417,6 +453,9 @@ class ConferenceClient {
             this.elements.startBtn.style.display = 'none';
             this.elements.stopBtn.style.display = 'inline-block';
             this.isRunning = true;
+            this.setVoiceSelectorsEnabled(false);
+            this.refreshPersonaState('A');
+            this.refreshPersonaState('B');
             
         } catch (error) {
             console.error('Failed to start conference:', error);
@@ -529,11 +568,16 @@ class ConferenceClient {
             const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
             const host = window.location.host || 'localhost:8999';
             
+            const disabledA = this.isPersonaDisabled('A');
+            const disabledB = this.isPersonaDisabled('B');
+
             const params = new URLSearchParams({
                 voice_a: this.elements.voiceA.value,
                 voice_b: this.elements.voiceB.value,
-                prompt_a: this.elements.promptA.value,
-                prompt_b: this.elements.promptB.value,
+                prompt_a: disabledA ? '' : this.elements.promptA.value,
+                prompt_b: disabledB ? '' : this.elements.promptB.value,
+                disabled_a: disabledA ? '1' : '0',
+                disabled_b: disabledB ? '1' : '0',
             });
             
             const wsPath = `${BASE_PATH}api/conference`;
@@ -656,24 +700,55 @@ class ConferenceClient {
         }
     }
     
-    
     updateConfig() {
         if (!this.ws || this.ws.readyState !== WebSocket.OPEN) return;
-        
+
         const config = {
             voice_a: this.elements.voiceA.value,
             voice_b: this.elements.voiceB.value,
             prompt_a: this.elements.promptA.value,
             prompt_b: this.elements.promptB.value,
+            disabled_a: this.isPersonaDisabled('A'),
+            disabled_b: this.isPersonaDisabled('B'),
         };
-        
+
         const payload = new TextEncoder().encode(JSON.stringify(config));
         const message = new Uint8Array(1 + payload.length);
         message[0] = 0x0A; // Config type
         message.set(payload, 1);
         this.ws.send(message);
     }
-    
+
+    isPersonaDisabled(persona) {
+        const select = persona === 'A' ? this.elements.voiceA : this.elements.voiceB;
+        if (!select) return false;
+        return select.value === DISABLED_VOICE_VALUE;
+    }
+
+    setVoiceSelectorsEnabled(enabled) {
+        if (this.elements.voiceA) this.elements.voiceA.disabled = !enabled;
+        if (this.elements.voiceB) this.elements.voiceB.disabled = !enabled;
+    }
+
+    refreshPersonaState(persona) {
+        const disabled = this.isPersonaDisabled(persona);
+        const panel = this.personaPanels?.[persona];
+        if (panel) {
+            panel.classList.toggle('persona-disabled', disabled);
+        }
+        const promptEl = persona === 'A' ? this.elements.promptA : this.elements.promptB;
+        if (promptEl) {
+            promptEl.disabled = disabled || this.isRunning;
+        }
+        const presetContainer = this.presetContainers?.[persona];
+        if (presetContainer) {
+            const buttons = presetContainer.querySelectorAll('button');
+            buttons.forEach((btn) => {
+                btn.disabled = disabled || this.isRunning;
+            });
+        }
+    }
+
     stop() {
         // Stop stats interval
         if (this.statsInterval) {
@@ -715,6 +790,9 @@ class ConferenceClient {
         this.isRunning = false;
         this.isConnected = false;
         this.updateStatus('disconnected');
+        this.setVoiceSelectorsEnabled(true);
+        this.refreshPersonaState('A');
+        this.refreshPersonaState('B');
         
         // Enable download if we have recording data
         if (this.recordingBuffers.mixedAudio.length > 0) {

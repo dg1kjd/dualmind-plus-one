@@ -106,6 +106,10 @@
             overflow: hidden;
         }
 
+        .persona-panel.persona-disabled {
+            opacity: 0.6;
+        }
+
         .persona-panel::before {
             content: '';
             position: absolute;
@@ -393,6 +397,12 @@
             color: #fff;
         }
 
+        .preset-btn:disabled {
+            opacity: 0.35;
+            cursor: not-allowed;
+            border-color: rgba(255,255,255,0.1);
+        }
+
         .btn-secondary:disabled {
             opacity: 0.4;
             cursor: not-allowed;
@@ -427,7 +437,7 @@
 
         <div class="conference-grid">
             <!-- Left Panel - AI Mind A -->
-            <div class="persona-panel left">
+            <div class="persona-panel left" data-persona-panel="A">
                 <div class="persona-header">
                     <span class="persona-name">AI Mind A</span>
                 </div>
@@ -447,12 +457,13 @@
                                 <option value="NATM1.pt">Marcus</option>
                                 <option value="NATM2.pt">James</option>
                                 <option value="NATM3.pt">Oliver</option>
+                                <option value="__disabled__">None / Disabled</option>
                             </select>
                         </div>
                     </div>
                     <div class="config-group">
                         <label>Personality Presets</label>
-                        <div class="preset-buttons">
+                        <div class="preset-buttons" data-persona-buttons="A">
                             <button class="preset-btn" onclick="setPreset('A', 'philosopher')">🤔 Philosopher</button>
                             <button class="preset-btn" onclick="setPreset('A', 'comedian')">😄 Comedian</button>
                             <button class="preset-btn" onclick="setPreset('A', 'detective')">🚔 Police Detective</button>
@@ -472,7 +483,7 @@
             </div>
 
             <!-- Right Panel - AI Mind B -->
-            <div class="persona-panel right">
+            <div class="persona-panel right" data-persona-panel="B">
                 <div class="persona-header">
                     <span class="persona-name">AI Mind B</span>
                 </div>
@@ -492,12 +503,13 @@
                                 <option value="NATF1.pt">Sophia</option>
                                 <option value="NATF2.pt">Elena</option>
                                 <option value="NATF3.pt">Maya</option>
+                                <option value="__disabled__">None / Disabled</option>
                             </select>
                         </div>
                     </div>
                     <div class="config-group">
                         <label>Personality Presets</label>
-                        <div class="preset-buttons">
+                        <div class="preset-buttons" data-persona-buttons="B">
                             <button class="preset-btn" onclick="setPreset('B', 'philosopher')">🤔 Philosopher</button>
                             <button class="preset-btn" onclick="setPreset('B', 'comedian')">😄 Comedian</button>
                             <button class="preset-btn" onclick="setPreset('B', 'detective')">🚔 Police Detective</button>
