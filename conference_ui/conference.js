@@ -130,6 +130,7 @@ class ConferenceClient {
         };
         this.recordingSampleRate = 48000; // Will be set from audioContext
         this.hasRecording = false;
+        this.miclessMode = false;
         
         this.initElements();
         this.initEventListeners();
@@ -424,19 +425,23 @@ class ConferenceClient {
                 }
             };
             
-            // Setup opus-recorder for mic encoding
+            // Setup opus-recorder for mic encoding (falls back to mic-less mode)
             await this.initRecorder();
             
             // Connect WebSocket
             await this.connectWebSocket();
             
-            // Start recording after connection established
-            // Recorder.start() will request mic permission and begin encoding
-            console.log('Starting recorder...');
-            this.recorder.start();
-            
-            // Setup mic analyzer after recorder starts (needs the media stream)
-            await this.setupMicAnalyser();
+            if (!this.miclessMode && this.recorder) {
+                // Start recording after connection established
+                // Recorder.start() will request mic permission and begin encoding
+                console.log('Starting recorder...');
+                this.recorder.start();
+                
+                // Setup mic analyzer after recorder starts (needs the media stream)
+                await this.setupMicAnalyser();
+            } else {
+                console.warn('Microphone unavailable; running AI-only mode.');
+            }
             
             // Start stats tracking
             this.stats.startTime = Date.now();
@@ -507,10 +512,20 @@ class ConferenceClient {
     }
     
     async initRecorder() {
-        return new Promise(async (resolve, reject) => {
+        return new Promise(async (resolve) => {
+            this.miclessMode = false;
+            this.mediaStream = null;
+            this.recorder = null;
+            const mediaDevices = navigator.mediaDevices;
+            if (!mediaDevices || !mediaDevices.getUserMedia) {
+                console.warn('MediaDevices API unavailable; running mic-less mode.');
+                this.miclessMode = true;
+                resolve();
+                return;
+            }
             try {
                 // Get mic stream for spectrum analyzer
-                this.mediaStream = await navigator.mediaDevices.getUserMedia({
+                this.mediaStream = await mediaDevices.getUserMedia({
                     audio: {
                         channelCount: 1,
                         echoCancellation: true,
@@ -518,7 +533,14 @@ class ConferenceClient {
                         autoGainControl: true,
                     }
                 });
-                
+            } catch (error) {
+                console.warn('Mic permission denied or unavailable, falling back to mic-less mode:', error);
+                this.miclessMode = true;
+                this.mediaStream = null;
+                resolve();
+                return;
+            }
+            try {
                 // opus-recorder handles resampling from browser rate to 24kHz internally
                 const recorderOptions = {
                     sourceNode: this.audioContext.createMediaStreamSource(this.mediaStream),
@@ -554,11 +576,12 @@ class ConferenceClient {
                 this.recorder.onstop = () => {
                     console.log('Recorder stopped');
                 };
-                
                 resolve();
             } catch (error) {
                 console.error('Recorder init error:', error);
-                reject(error);
+                this.miclessMode = true;
+                this.recorder = null;
+                resolve();
             }
         });
     }
@@ -578,6 +601,7 @@ class ConferenceClient {
                 prompt_b: disabledB ? '' : this.elements.promptB.value,
                 disabled_a: disabledA ? '1' : '0',
                 disabled_b: disabledB ? '1' : '0',
+                mic_disabled: this.miclessMode ? '1' : '0',
             });
             
             const wsPath = `${BASE_PATH}api/conference`;

@@ -537,6 +537,7 @@ class ConferenceServer:
         prompt_b = request.query.get("prompt_b", "You enjoy having a good conversation.")
         disabled_a = request.query.get("disabled_a", "0") in ("1", "true", "True")
         disabled_b = request.query.get("disabled_b", "0") in ("1", "true", "True")
+        micless_mode = request.query.get("mic_disabled", "0") in ("1", "true", "True")
         persona_a_enabled = not disabled_a
         persona_b_enabled = not disabled_b
 
@@ -596,8 +597,10 @@ class ConferenceServer:
 
         async def user_input_loop():
             """Read decoded user PCM and send to mixer"""
+            if micless_mode:
+                logger.info("[UserInput] Skipped (micless_mode=True)")
+                return
             logger.info("[UserInput] Started")
-            # Accumulate partial frames
             user_accum = np.zeros(self.frame_size * 2, dtype=np.float32)
             user_accum_len = 0
             
@@ -607,16 +610,13 @@ class ConferenceServer:
                     user_pcm = user_opus_reader.read_pcm()
                     
                     if user_pcm.shape[-1] > 0:
-                        # Accumulate incoming PCM
                         pcm_len = user_pcm.shape[-1]
                         if user_accum_len + pcm_len <= len(user_accum):
                             user_accum[user_accum_len:user_accum_len + pcm_len] = user_pcm
                             user_accum_len += pcm_len
                         
-                        # Send complete frames
                         while user_accum_len >= self.frame_size:
                             frame = user_accum[:self.frame_size].copy()
-                            # Shift remaining data
                             user_accum[:user_accum_len - self.frame_size] = user_accum[self.frame_size:user_accum_len]
                             user_accum_len -= self.frame_size
                             
@@ -652,14 +652,26 @@ class ConferenceServer:
             
             last_stats_time = time.time()
             
+            frame_interval = 1.0 / self.frame_rate
+            next_frame_time = time.time()
             try:
                 while not close:
                     # === Get user frame (timing master) ===
-                    try:
-                        user_frame = user_to_mixer.get_nowait()
-                    except asyncio.QueueEmpty:
-                        await asyncio.sleep(0.001)
-                        continue
+                    if micless_mode:
+                        now = time.time()
+                        if next_frame_time > now:
+                            await asyncio.sleep(next_frame_time - now)
+                        else:
+                            next_frame_time = now
+                        user_frame = silence.copy()
+                        next_frame_time += frame_interval
+                        stats['user_frames'] = stats.get('user_frames', 0) + 1
+                    else:
+                        try:
+                            user_frame = user_to_mixer.get_nowait()
+                        except asyncio.QueueEmpty:
+                            await asyncio.sleep(0.001)
+                            continue
                     
                     stats['mixer_cycles'] += 1
                     
@@ -906,10 +918,11 @@ class ConferenceServer:
             # Launch async tasks
             tasks = [
                 asyncio.create_task(recv_loop()),
-                asyncio.create_task(user_input_loop()),
                 asyncio.create_task(process_bridge()),
                 asyncio.create_task(send_loop()),
             ]
+            if not micless_mode:
+                tasks.append(asyncio.create_task(user_input_loop()))
             
             done, pending = await asyncio.wait(tasks, return_when=asyncio.FIRST_COMPLETED)
             for task in pending:
