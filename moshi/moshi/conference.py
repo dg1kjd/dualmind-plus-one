@@ -32,6 +32,7 @@ import ctypes
 
 import aiohttp
 from aiohttp import web
+from aiohttp.web_exceptions import HTTPForbidden, HTTPBadRequest
 from huggingface_hub import hf_hub_download
 import numpy as np
 import sentencepiece
@@ -423,6 +424,9 @@ class PersonaHandle:
     output_buffer: SharedOutputBuffer  # Shared memory for output audio
 
 
+MAX_PROMPT_LEN = 4096
+
+
 class ConferenceServer:
     """
     Conference server using multiprocessing for GPU isolation.
@@ -437,6 +441,7 @@ class ConferenceServer:
         moshi_weight: str,
         tokenizer_path: str,
         voice_prompt_dir: str,
+        allowed_origins: Optional[List[str]] = None,
     ):
         self.device_a = device_a
         self.device_b = device_b
@@ -448,6 +453,11 @@ class ConferenceServer:
         self.sample_rate = 24000
         self.frame_rate = 12.5
         self.frame_size = int(self.sample_rate / self.frame_rate)
+        self.allowed_origins = allowed_origins or []
+        self.session_lock = asyncio.Lock()
+        self.session_active = False
+        self.max_prompt_len = MAX_PROMPT_LEN
+        self.allowed_voice_files = self._load_voice_files()
         
         # Spawn worker processes
         logger.info("Spawning worker processes...")
@@ -459,6 +469,28 @@ class ConferenceServer:
         self._wait_for_ready(self.persona_a)
         self._wait_for_ready(self.persona_b)
         logger.info("Conference server ready!")
+
+    def _load_voice_files(self) -> set:
+        voices: set[str] = set()
+        if os.path.exists(self.voice_prompt_dir):
+            for fname in os.listdir(self.voice_prompt_dir):
+                if fname.endswith('.pt'):
+                    voices.add(fname)
+        if not voices:
+            logger.warning("No voice prompt .pt files found in %s", self.voice_prompt_dir)
+        return voices
+
+    def _sanitize_prompt(self, text: str) -> str:
+        if not isinstance(text, str):
+            return ""
+        cleaned = text.strip()
+        return cleaned[:self.max_prompt_len]
+
+    def _validate_voice(self, voice_name: str) -> str:
+        safe_name = os.path.basename(voice_name)
+        if safe_name not in self.allowed_voice_files:
+            raise ValueError(f"Unknown or disallowed voice: {safe_name}")
+        return safe_name
 
     def _spawn_worker(self, name: str, device: torch.device) -> PersonaHandle:
         """Spawn a persona worker process with shared memory buffers"""
@@ -525,7 +557,12 @@ class ConferenceServer:
 
     async def handle_conference(self, request):
         """WebSocket handler for conference sessions using multiprocessing workers"""
-        ws = web.WebSocketResponse()
+        origin = request.headers.get('Origin')
+        if self.allowed_origins and (origin is None or origin not in self.allowed_origins):
+            logger.warning("Rejected connection from origin %s", origin)
+            raise HTTPForbidden(reason="Origin not allowed")
+
+        ws = web.WebSocketResponse(max_msg_size=4 * 1024 * 1024)
         await ws.prepare(request)
         clog = ColorizedLog.randomize()
         clog.log("info", f"Conference connection from {request.remote}")
@@ -541,11 +578,29 @@ class ConferenceServer:
         persona_a_enabled = not disabled_a
         persona_b_enabled = not disabled_b
 
+        try:
+            voice_a = self._validate_voice(voice_a)
+            voice_b = self._validate_voice(voice_b)
+        except ValueError as exc:
+            logger.warning("Voice validation failed: %s", exc)
+            await ws.close(code=4000, message=str(exc).encode())
+            return ws
+
+        prompt_a = self._sanitize_prompt(prompt_a)
+        prompt_b = self._sanitize_prompt(prompt_b)
+
         if not persona_a_enabled and not persona_b_enabled:
             clog.log("error", "Client requested conference with no active personas")
             await ws.close(code=aiohttp.WSCloseCode.PROTOCOL_ERROR, message=b"No personas enabled")
             return ws
         
+        session_claimed = False
+        async with self.session_lock:
+            if self.session_active:
+                await ws.close(code=4001, message=b"Conference already running")
+                return ws
+            self.session_active = True
+            session_claimed = True
         close = False
         user_opus_reader = sphn.OpusStreamReader(self.sample_rate)
         output_opus_writer = sphn.OpusStreamWriter(self.sample_rate)
@@ -584,9 +639,21 @@ class ConferenceServer:
                         try:
                             config = json.loads(data[1:].decode('utf-8'))
                             if 'voice_a' in config and persona_a_enabled and not config.get('disabled_a'):
-                                self.persona_a.ctrl_queue.put(("config", config['voice_a'], config.get('prompt_a', '')))
+                                try:
+                                    sanitized_voice = self._validate_voice(config['voice_a'])
+                                except ValueError as exc:
+                                    logger.warning("[recv_loop] Invalid voice_a: %s", exc)
+                                else:
+                                    prompt = self._sanitize_prompt(config.get('prompt_a', ''))
+                                    self.persona_a.ctrl_queue.put(("config", sanitized_voice, prompt))
                             if 'voice_b' in config and persona_b_enabled and not config.get('disabled_b'):
-                                self.persona_b.ctrl_queue.put(("config", config['voice_b'], config.get('prompt_b', '')))
+                                try:
+                                    sanitized_voice = self._validate_voice(config['voice_b'])
+                                except ValueError as exc:
+                                    logger.warning("[recv_loop] Invalid voice_b: %s", exc)
+                                else:
+                                    prompt = self._sanitize_prompt(config.get('prompt_b', ''))
+                                    self.persona_b.ctrl_queue.put(("config", sanitized_voice, prompt))
                         except Exception as e:
                             logger.error(f"[recv_loop] Config error: {e}")
             except Exception as e:
@@ -598,7 +665,7 @@ class ConferenceServer:
         async def user_input_loop():
             """Read decoded user PCM and send to mixer"""
             if micless_mode:
-                logger.info("[UserInput] Skipped (micless_mode=True)")
+                logger.info(f"[UserInput] Started (micless_mode={micless_mode})")
                 return
             logger.info("[UserInput] Started")
             user_accum = np.zeros(self.frame_size * 2, dtype=np.float32)
@@ -862,89 +929,88 @@ class ConferenceServer:
             finally:
                 logger.info("[send_loop] Ended")
 
-        async with self.lock:
-            seed_all(42424242)
-            
-            # Configure and reset workers
-            clog.log("info", "Configuring personas...")
-            if persona_a_enabled:
-                self.persona_a.ctrl_queue.put(("config", voice_a, prompt_a))
-                self.persona_a.ctrl_queue.put(("reset",))
-            if persona_b_enabled:
-                self.persona_b.ctrl_queue.put(("config", voice_b, prompt_b))
-                self.persona_b.ctrl_queue.put(("reset",))
-            
-            # Process system prompts in workers
-            clog.log("info", "Processing system prompts...")
-            expected_prompts = 0
-            if persona_a_enabled:
-                self.persona_a.ctrl_queue.put(("system_prompts",))
-                expected_prompts += 1
-            if persona_b_enabled:
-                self.persona_b.ctrl_queue.put(("system_prompts",))
-                expected_prompts += 1
-            
-            # Wait for both to finish
-            prompts_done = 0
-            timeout = time.time() + 60.0
-            while prompts_done < expected_prompts and time.time() < timeout:
+        try:
+            async with self.lock:
+                seed_all(42424242)
+                
+                # Configure and reset workers
+                clog.log("info", "Configuring personas...")
                 if persona_a_enabled:
-                    try:
-                        msg = self.persona_a.status_queue.get_nowait()
-                        if msg[0] == "system_prompts_done":
-                            prompts_done += 1
-                            clog.log("info", "PersonaA system prompts done")
-                            persona_a_enabled = True
-                    except:
-                        pass
+                    self.persona_a.ctrl_queue.put(("config", voice_a, prompt_a))
+                    self.persona_a.ctrl_queue.put(("reset",))
                 if persona_b_enabled:
+                    self.persona_b.ctrl_queue.put(("config", voice_b, prompt_b))
+                    self.persona_b.ctrl_queue.put(("reset",))
+                
+                # Process system prompts in workers
+                clog.log("info", "Processing system prompts...")
+                expected_prompts = 0
+                if persona_a_enabled:
+                    self.persona_a.ctrl_queue.put(("system_prompts",))
+                    expected_prompts += 1
+                if persona_b_enabled:
+                    self.persona_b.ctrl_queue.put(("system_prompts",))
+                    expected_prompts += 1
+                
+                # Wait for both to finish
+                prompts_done = 0
+                timeout = time.time() + 60.0
+                while prompts_done < expected_prompts and time.time() < timeout:
+                    if persona_a_enabled:
+                        try:
+                            msg = self.persona_a.status_queue.get_nowait()
+                            if msg[0] == "system_prompts_done":
+                                prompts_done += 1
+                                clog.log("info", "PersonaA system prompts done")
+                                persona_a_enabled = True
+                        except:
+                            pass
+                    if persona_b_enabled:
+                        try:
+                            msg = self.persona_b.status_queue.get_nowait()
+                            if msg[0] == "system_prompts_done":
+                                prompts_done += 1
+                                clog.log("info", "PersonaB system prompts done")
+                                persona_b_enabled = True
+                        except:
+                            pass
+                    await asyncio.sleep(0.01)
+                
+                if expected_prompts > 0 and prompts_done < expected_prompts:
+                    logger.error("Timeout waiting for system prompts")
+                
+                # Send handshake
+                await ws.send_bytes(b"\x00")
+                clog.log("info", "Conference started!")
+                
+                # Launch async tasks
+                tasks = [
+                    asyncio.create_task(recv_loop()),
+                    asyncio.create_task(process_bridge()),
+                    asyncio.create_task(send_loop()),
+                ]
+                if not micless_mode:
+                    tasks.append(asyncio.create_task(user_input_loop()))
+                
+                done, pending = await asyncio.wait(tasks, return_when=asyncio.FIRST_COMPLETED)
+                for task in pending:
+                    task.cancel()
                     try:
-                        msg = self.persona_b.status_queue.get_nowait()
-                        if msg[0] == "system_prompts_done":
-                            prompts_done += 1
-                            clog.log("info", "PersonaB system prompts done")
-                            persona_b_enabled = True
-                    except:
+                        await task
+                    except asyncio.CancelledError:
                         pass
-                await asyncio.sleep(0.01)
-            
-            if expected_prompts > 0 and prompts_done < expected_prompts:
-                logger.error("Timeout waiting for system prompts")
-            
-            # Send handshake
-            await ws.send_bytes(b"\x00")
-            clog.log("info", "Conference started!")
-            
-            # Launch async tasks
-            tasks = [
-                asyncio.create_task(recv_loop()),
-                asyncio.create_task(process_bridge()),
-                asyncio.create_task(send_loop()),
-            ]
-            if not micless_mode:
-                tasks.append(asyncio.create_task(user_input_loop()))
-            
-            done, pending = await asyncio.wait(tasks, return_when=asyncio.FIRST_COMPLETED)
-            for task in pending:
-                task.cancel()
-                try:
-                    await task
-                except asyncio.CancelledError:
-                    pass
-            
+        finally:
             await ws.close()
             clog.log("info", "Conference ended")
+            if session_claimed:
+                async with self.session_lock:
+                    self.session_active = False
         
         return ws
 
     async def handle_voices(self, request):
         """Return available voices"""
-        voices = []
-        if os.path.exists(self.voice_prompt_dir):
-            for f in os.listdir(self.voice_prompt_dir):
-                if f.endswith('.pt'):
-                    voices.append(f)
-        return web.json_response(sorted(voices))
+        return web.json_response(sorted(self.allowed_voice_files))
 
 
 def _get_voice_prompt_dir(voice_prompt_dir: Optional[str], hf_repo: str) -> str:
@@ -979,6 +1045,7 @@ def main():
     parser.add_argument("--voice-prompt-dir", type=str)
     parser.add_argument("--ssl", type=str, help="Directory with key.pem and cert.pem")
     parser.add_argument("--static", type=str, help="Path to static files for conference UI")
+    parser.add_argument("--allowed-origin", action='append', help="Allowed Origin header values for WebSocket requests (can be specified multiple times)")
     args = parser.parse_args()
 
     # Get model paths
@@ -1001,6 +1068,7 @@ def main():
         moshi_weight=args.moshi_weight,
         tokenizer_path=args.tokenizer,
         voice_prompt_dir=args.voice_prompt_dir,
+        allowed_origins=args.allowed_origin,
     )
     
     app = web.Application()

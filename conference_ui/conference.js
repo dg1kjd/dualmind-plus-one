@@ -624,10 +624,19 @@ class ConferenceClient {
                 reject(error);
             };
             
-            this.ws.onclose = () => {
-                console.log('WebSocket closed');
+            this.ws.onclose = (event) => {
+                console.log('WebSocket closed', event.code, event.reason);
                 this.updateStatus('disconnected');
                 this.isConnected = false;
+                this.isRunning = false;
+                this.setVoiceSelectorsEnabled(true);
+                this.refreshPersonaState('A');
+                this.refreshPersonaState('B');
+                this.elements.startBtn.style.display = 'inline-block';
+                this.elements.stopBtn.style.display = 'none';
+                if (event.code === 4001) {
+                    alert('Server is currently busy running another conference. Please try again in a moment.');
+                }
             };
             
             // Wait for handshake
