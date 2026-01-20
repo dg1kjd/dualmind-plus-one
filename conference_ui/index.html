@@ -29,10 +29,33 @@
         }
 
         header {
-            text-align: center;
+            display: flex;
+            align-items: center;
+            justify-content: flex-start;
+            gap: 20px;
+            text-align: left;
             padding: 20px 0;
             border-bottom: 1px solid rgba(118, 185, 0, 0.3);
             margin-bottom: 20px;
+            min-height: 110px;
+        }
+
+        .brand-logo {
+            height: 90px;
+            width: auto;
+            object-fit: contain;
+            flex-shrink: 0;
+        }
+
+        .logo-link {
+            display: inline-flex;
+            align-items: center;
+        }
+
+        .header-text {
+            display: flex;
+            flex-direction: column;
+            gap: 6px;
         }
 
         h1 {
@@ -418,14 +441,27 @@
             .conference-grid {
                 grid-template-columns: 1fr;
             }
+            header {
+                flex-direction: column;
+                align-items: flex-start;
+                min-height: unset;
+            }
+            .brand-logo {
+                height: 70px;
+            }
         }
     </style>
 </head>
 <body>
     <div class="container">
         <header>
-            <h1>DualMind +1</h1>
-            <p class="subtitle">MoshiPlex Edition — Two AI minds in conversation, with your participation</p>
+            <a href="https://www.jens-david-consulting.com" class="logo-link" target="_blank" rel="noreferrer noopener">
+                <img src="jdc.png" alt="Jens David Consulting" class="brand-logo">
+            </a>
+            <div class="header-text">
+                <h1>DualMind + 1</h1>
+                <div class="subtitle">MoshiPlex Edition — Autonomous AI Dialogue Showcase</div>
+            </div>
         </header>
 
         <div class="status-bar">
