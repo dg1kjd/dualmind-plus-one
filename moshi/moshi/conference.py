@@ -568,8 +568,8 @@ class ConferenceServer:
         clog.log("info", f"Conference connection from {request.remote}")
 
         # Parse configuration from query params
-        voice_a = request.query.get("voice_a", "NATF1.pt")
-        voice_b = request.query.get("voice_b", "NATM1.pt")
+        voice_a_param = request.query.get("voice_a", "NATF1.pt")
+        voice_b_param = request.query.get("voice_b", "NATM1.pt")
         prompt_a = request.query.get("prompt_a", "You enjoy having a good conversation.")
         prompt_b = request.query.get("prompt_b", "You enjoy having a good conversation.")
         disabled_a = request.query.get("disabled_a", "0") in ("1", "true", "True")
@@ -578,9 +578,13 @@ class ConferenceServer:
         persona_a_enabled = not disabled_a
         persona_b_enabled = not disabled_b
 
+        voice_a = None
+        voice_b = None
         try:
-            voice_a = self._validate_voice(voice_a)
-            voice_b = self._validate_voice(voice_b)
+            if persona_a_enabled:
+                voice_a = self._validate_voice(voice_a_param)
+            if persona_b_enabled:
+                voice_b = self._validate_voice(voice_b_param)
         except ValueError as exc:
             logger.warning("Voice validation failed: %s", exc)
             await ws.close(code=4000, message=str(exc).encode())
