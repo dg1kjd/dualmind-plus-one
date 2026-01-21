@@ -1,10 +1,42 @@
-# DualMind+1 Moshi Edition
+<p align="center">
+  <img src="conference_ui/jdc.png" alt="DualMind+1 Moshi Edition logo" width="180" />
+</p>
+
+<h1 align="center">DualMind+1 Moshi Edition</h1>
+
+<p align="center">
+  <strong>Full-duplex, sub-250ms, voice-to-voice AI conversations derived from NVIDIA's PersonaPlex.</strong><br/>
+  <a href="https://github.com/dg1kjd/dualmind-plus-one">GitHub Repository</a> ·
+  <a href="https://jens-david-consulting.com/dualmind/">Live Demo</a>
+</p>
+
+---
+
+### Quick Links
+
+- 🔗 **Repository**: [github.com/dg1kjd/dualmind-plus-one](https://github.com/dg1kjd/dualmind-plus-one)
+- 🚀 **Live Demo**: [https://jens-david-consulting.com/dualmind/](https://jens-david-consulting.com/dualmind/)
+
+---
+
+## Contents
+
+1. [Overview](#overview)
+2. [System Components](#system-components)
+3. [Requirements](#requirements)
+4. [Installation](#installation)
+5. [Running the System](#running-the-system)
+6. [Credits / License / Authors](#credits--license--copyright--authors)
+7. [Disclaimer](#disclaimer)
+8. [Acknowledgments](#acknowledgments)
+
+---
+
+## Overview
 
 **DualMind+1 Moshi Edition** (or **DualMind+1**) is a production-re^WAI-slo^W voice-to-voice full duplex conversational conference system derived from NVIDIA's PersonaPlex (which in turn is derived from Kyutai Moshi). Basically two instances of the PersonaPlex model running in parallel, talking to each other, and (optionally) the user as well. It therefore showcases what these audio-based models are capable off: Full human-like conversation flow with extremely low (sub-250ms) latency, full-duplex operation, barge in, backgrounding (um-humming, etc., "right", "ok", "yes", "sure", "that's right"), exclamations ("gosh!", "oh my god", laughter), stuttering, coughing, and lots of "ummm" and "ahhhs". It is the audio version of the well-known DualMind system that lets two text-based LLMs talk to each other.
 In one sentence: The output that this demo produces feels like a natural conversation between two humans, which at times is very impressive.
 Sysprompt-like text descriptions for both AI parties can be provided. Several different voices, both native and with non-native absolutely real-sounding accents can be selected for each AI party individually. By disabling one AI party (setting AI party B voice to "None/Disabled") you basically get the functionality of NVIDIA's PersonaPlex system, i.e. you can talk to a single AI party using your mic/speaker. Headset not required in any case, due to echo cancellation and intrinsic echo resistence of the models. Language: Only English trained. Intelligence: If you are looking for a highly intelligent AI assistant, this is not the right tool for you. DualMind+1 is a -- possibly entertaining -- conversational system, not a chatbot. It is designed to simulate human conversation, not to provide intellectually stimulating or scientifically/technically deep/accurate insights. Neither is there "a simple way" to make it "smart" like Grok/Claude or even Gemma by "wiring in" a text-based LLM because it operates on audio instead of text.
-
-## Overview
 
 The system consists of a server part and a client part. The server part comprises a web server that provides via static HTTP server the conference UI client and handles the audio conferencing / signal processing and neural network processing via PyTorch / modified Moshi framework. It requires and automatically downloads NVIDIA's PersonaPlex weights from Hugging Face on first start.
 The client part is a React-based frontend for user interaction, handling audio input and output, served to a standard web browser (must be pretty recent for WASM, Opus, Microphone access, Websocket etc.) via the built-in static HTTP server. It can work either locally or via the Internet, leveraging OPUS audio compression for reduced bandwidth usage and also provides transcriptions of the audio streams.
