@@ -179,6 +179,12 @@ laurent/cuda-test/check
 client/node_modules
 timings.json
 mlx-trace.json
+# Weight artifacts (downloaded dynamically; keep them out of git)
+/weights/model.safetensors
+/weights/tokenizer-e351c8d8-checkpoint125.safetensors
+/weights/tokenizer_spm_32k_3.model
+/weights/voices.tgz
+/weights/dist.tgz
 
 # Include everything in assets
 !assets/
