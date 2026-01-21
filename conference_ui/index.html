@@ -40,6 +40,41 @@
             min-height: 110px;
         }
 
+        .header-text {
+            display: flex;
+            flex-direction: column;
+            gap: 6px;
+        }
+
+        .header-actions {
+            margin-left: auto;
+        }
+
+        .github-link {
+            display: inline-flex;
+            align-items: center;
+            gap: 10px;
+            padding: 12px 18px;
+            border-radius: 999px;
+            border: 1px solid rgba(255, 255, 255, 0.2);
+            color: #fff;
+            text-decoration: none;
+            font-weight: 600;
+            transition: transform 0.2s ease, box-shadow 0.2s ease, border-color 0.2s ease;
+        }
+
+        .github-link:hover {
+            border-color: rgba(255, 255, 255, 0.4);
+            box-shadow: 0 10px 30px rgba(0, 0, 0, 0.45);
+            transform: translateY(-1px);
+        }
+
+        .github-icon {
+            width: 22px;
+            height: 22px;
+            fill: currentColor;
+        }
+
         .brand-logo {
             height: 90px;
             width: auto;
@@ -52,11 +87,7 @@
             align-items: center;
         }
 
-        .header-text {
-            display: flex;
-            flex-direction: column;
-            gap: 6px;
-        }
+
 
         h1 {
             font-size: 2.5rem;
@@ -467,7 +498,7 @@
     <div class="container">
         <header>
             <a href="https://www.jens-david-consulting.com" class="logo-link" target="_blank" rel="noreferrer noopener">
-                <img src="jdc.png" alt="Jens David Consulting" class="brand-logo">
+                <img src="assets/dualmind.jpg" alt="DualMind+1 functional logo" class="brand-logo">
             </a>
             <div class="header-text">
                 <h1>DualMind + 1</h1>
@@ -476,6 +507,14 @@
                 <div class="quickstart-note">
                     NOTE: For quickstart press green START CONFERENCE button at the bottom of this page. If you want dialogue instead of conference, set Participant B voice to "None/Disabled" before and unmute your mic.
                 </div>
+            </div>
+            <div class="header-actions">
+                <a class="github-link" href="https://github.com/dg1kjd/dualmind-plus-one" target="_blank" rel="noreferrer noopener">
+                    <svg class="github-icon" viewBox="0 0 24 24" aria-hidden="true">
+                        <path d="M12 0.297c-6.63 0-12 5.373-12 12 0 5.303 3.438 9.8 8.205 11.385 0.6 0.113 0.82-0.26 0.82-0.577 0-0.285-0.01-1.04-0.015-2.04-3.338 0.726-4.042-1.61-4.042-1.61-0.546-1.387-1.333-1.757-1.333-1.757-1.09-0.745 0.083-0.73 0.083-0.73 1.205 0.085 1.84 1.237 1.84 1.237 1.07 1.835 2.807 1.305 3.492 0.998 0.108-0.775 0.418-1.305 0.762-1.605-2.665-0.305-5.466-1.335-5.466-5.93 0-1.31 0.468-2.38 1.235-3.22-0.135-0.303-0.54-1.523 0.105-3.176 0 0 1.005-0.322 3.3 1.23 0.96-0.267 1.98-0.4 3-0.405 1.02 0.005 2.04 0.138 3 0.405 2.28-1.552 3.285-1.23 3.285-1.23 0.645 1.653 0.24 2.873 0.12 3.176 0.765 0.84 1.23 1.91 1.23 3.22 0 4.61-2.805 5.62-5.475 5.92 0.435 0.375 0.81 1.11 0.81 2.24 0 1.615-0.015 2.915-0.015 3.315 0 0.315 0.21 0.69 0.825 0.57C20.565 22.092 24 17.592 24 12.297c0-6.627-5.373-12-12-12" />
+                    </svg>
+                    <span>View on GitHub</span>
+                </a>
             </div>
         </header>
 
