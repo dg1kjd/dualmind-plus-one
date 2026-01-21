@@ -22,6 +22,7 @@ The backend part of the server uses PyTorch to run inference on the two Moshi in
 
 - **Hardware**: Recommended 2 CUDA devices, minimum 2x RTX 3090. Tested on 1x RTX 3090 and 1x RTX 5090. VRAM consumption: ~19.5GB per GPU. Two RTX 3090s should be just fine as well. Alternatively data center-grade compute (i.e. A100/H100). The system runs one moshi instance per GPU together with its respective mimi codecs. CPU is not used heavily, only for mixing and simple SRC.
 - **Software**: Tested with Python 3.11.12, Pytorch nightly (torch-2.11.0.dev20260117+cu128), CUDA 12.8, Transformers 4.57.3. Confer requirements.txt for rough guidance.
+- **Power Consumption**: About 240W for RTX 3090, 190W for RTX 5090 (continuous during conversation)
 - **Hugging Face account** for downloading weights.
 - **Network**: Should be as low-latency as possible, audio buffering is set to 80ms. LAN/localhost connection recommended.
 - **Audio**: Microphone/Speaker combo, headset optional.
@@ -38,18 +39,27 @@ This is an experimental system, these are only approximate instructions. You sho
    git clone https://github.com/dg1kjd/dualmind-plus-one.git
    cd dualmind-plus-one
    ```
-2. Set up a virtual environment and install the Python deps used by the    Moshi backend:
+2. Set up a virtual environment for all backend components:
    ```bash
    python3 -m venv .venv
    source .venv/bin/activate
-   pip3 install -r requirements.txt
    ```
-3. Install npm
+3. Install a CUDA 12.8+/sm_120 capable PyTorch nightly build (required for RTX 5090 / Blackwell class GPUs). If you run older GPUs you may choose a different wheel, but the nightly ensures kernels exist for the latest architectures:
    ```bash
+   pip install --pre torch torchvision torchaudio --index-url https://download.pytorch.org/whl/nightly/cu128
+   ```
+4. Install the remaining backend dependencies (this also installs the local `moshi` package via the editable requirement):
+   ```bash
+   pip install -r requirements.txt
+   ```
+5. Build the React client (note the `client/` subfolder):
+   ```bash
+   cd client
    npm install
    npm run build
-  ```
-4. Generate self-signed SSL certificate (if needed). **Note: SSL required for audio to work**
+   ```
+   The build artifacts will be emitted to `client/dist/`; the server can also serve the checked-in `conference_ui` folder.
+6. Generate self-signed SSL certificate (if needed). **Note: SSL required for audio to work**
    ```bash
    apt-get update && apt-get install -y openssl
    openssl req -x509 -nodes -days 365 -newkey rsa:2048 \
@@ -63,7 +73,11 @@ Tested on heavily modified Ubuntu 24.04.6 LTS with CUDA 12.8 and Consumer Blackw
 
 To start the DualMind+1 conference system, use the following command:
 ```bash
-source .venv/bin/activate && PYTHONUNBUFFERED=1 python -m moshi.conference --device-a cuda:0 --device-b cuda:1 --static conference_ui --port 8999 
+source .venv/bin/activate && \
+PYTORCH_CUDA_ALLOC_CONF=expandable_segments:True,max_split_size_mb:256 \
+PYTHONUNBUFFERED=1 python -m moshi.conference \
+  --device-a cuda:0 --device-b cuda:1 \
+  --static conference_ui --port 8999
 ```
 Will run locally, point web browser to https://localhost:8999 . ***The "S" is important because most web browsers will refuse to access the microphone if the connection is not secure.***
 
