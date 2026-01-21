@@ -1,5 +1,5 @@
 <p align="center">
-  <img src="conference_ui/jdc.png" alt="DualMind+1 Moshi Edition logo" width="180" />
+  <img src="conference_ui/assets/dualmind.jpg" alt="DualMind+1 functional logo" width="420" />
 </p>
 
 <h1 align="center">DualMind+1 Moshi Edition</h1>
