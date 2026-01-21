@@ -38,11 +38,23 @@ This is an experimental system, these are only approximate instructions. You sho
    git clone https://github.com/dg1kjd/dualmind-plus-one.git
    cd dualmind-plus-one
    ```
-2. Set up a virtual environment:
+2. Set up a virtual environment and install the Python deps used by the    Moshi backend:
    ```bash
    python3 -m venv .venv
    source .venv/bin/activate
    pip3 install -r requirements.txt
+   ```
+3. Install npm
+   ```bash
+   npm install
+   npm run build
+  ```
+4. Generate self-signed SSL certificate (if needed). **Note: SSL required for audio to work**
+   ```bash
+   apt-get update && apt-get install -y openssl
+   openssl req -x509 -nodes -days 365 -newkey rsa:2048 \
+    -keyout key.pem -out cert.pem \
+    -subj "/C=US/ST=State/L=City/O=Organization/CN=localhost"
    ```
 
 Tested on heavily modified Ubuntu 24.04.6 LTS with CUDA 12.8 and Consumer Blackwell & Ampere.
