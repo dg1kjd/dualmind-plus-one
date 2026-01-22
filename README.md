@@ -34,21 +34,19 @@
 
 ## Overview
 
-**DualMind+1 Moshi Edition** (or **DualMind+1**) is a production-re^WAI-slo^W voice-to-voice full duplex conversational conference system derived from NVIDIA's PersonaPlex (which in turn is derived from Kyutai Moshi). Basically two instances of the PersonaPlex model running in parallel, talking to each other, and (optionally) the user as well. It therefore showcases what these audio-based models are capable off: Full human-like conversation flow with extremely low (sub-250ms) latency, full-duplex operation, barge in, backgrounding (um-humming, etc., "right", "ok", "yes", "sure", "that's right"), exclamations ("gosh!", "oh my god", laughter), stuttering, coughing, and lots of "ummm" and "ahhhs". It is the audio version of the well-known DualMind system that lets two text-based LLMs talk to each other.
-In one sentence: The output that this demo produces feels like a natural conversation between two humans, which at times is very impressive.
-Sysprompt-like text descriptions for both AI parties can be provided. Several different voices, both native and with non-native absolutely real-sounding accents can be selected for each AI party individually. By disabling one AI party (setting AI party B voice to "None/Disabled") you basically get the functionality of NVIDIA's PersonaPlex system, i.e. you can talk to a single AI party using your mic/speaker. Headset not required in any case, due to echo cancellation and intrinsic echo resistence of the models. Language: Only English trained. Intelligence: If you are looking for a highly intelligent AI assistant, this is not the right tool for you. DualMind+1 is a -- possibly entertaining -- conversational system, not a chatbot. It is designed to simulate human conversation, not to provide intellectually stimulating or scientifically/technically deep/accurate insights. Neither is there "a simple way" to make it "smart" like Grok/Claude or even Gemma by "wiring in" a text-based LLM because it operates on audio instead of text.
+**DualMind+1 Moshi Edition** is a full-duplex, voice-to-voice conversational system derived from NVIDIA's PersonaPlex (itself based on Kyutai's Moshi). Two PersonaPlex instances run in parallel, speaking with each other and—if you want— with the user. The demo highlights what low-latency audio LLMs can currently do: sub-250 ms response times, barge-ins, back-channeling ("right", "sure", "mhm"), spontaneous exclamations, and messy human fillers like "umm" or laughter.
 
-The system consists of a server part and a client part. The server part comprises a web server that provides via static HTTP server the conference UI client and handles the audio conferencing / signal processing and neural network processing via PyTorch / modified Moshi framework. It requires and automatically downloads NVIDIA's PersonaPlex weights from Hugging Face on first start.
-The client part is a React-based frontend for user interaction, handling audio input and output, served to a standard web browser (must be pretty recent for WASM, Opus, Microphone access, Websocket etc.) via the built-in static HTTP server. It can work either locally or via the Internet, leveraging OPUS audio compression for reduced bandwidth usage and also provides transcriptions of the audio streams.
-The backend part of the server uses PyTorch to run inference on the two Moshi instances and Mimi encoders and decoders, as well as light DSP (channel mixing, resampling, etc.).
+You can tailor each AI party with a system-style prompt and choose from several native or accented voices. Disabling the second participant turns the experience into a PersonaPlex-like single-agent conversation. A headset is optional thanks to echo cancellation and the model's inherent echo resistance. English is the only supported language. This is an entertainment-focused conversational showcase, not a research assistant, and it cannot be "patched" with a text LLM because the entire stack operates on audio streams.
+
+The platform is split between a Python conference server that mixes audio, runs the Moshi+Mimi inference stack, and serves static assets, plus a lightweight web client that captures microphone audio, streams Opus-compressed frames, and renders the conference UI.
 
 ## System Components
 
-- **Client Frontend**: A React-based frontend for user interaction, handling audio input and output. Uses WASM and websocket for audio handling and transmission. Opus audio compression is used for reduced bandwidth usage.
-- **Conference UI**: A web interface for real-time audio conferencing, supported by some JavaScript plumbing. Spectrum estimator for AI parties and user microphone.
-- **Moshi**: The core inference engine for audio generation, based on Kyutai's models, running NVIDIA's PersonaPlex weights, slightly modified for performance and Blackwell support.
-- **Mimi**: The neural audio codec using Residual Vector Quantization (RVQ) for datarate-reduced model I/O instead of tokenization.
-- **Weights**: Pre-trained model weights for audio processing, under NVIDIA Open Model License. **Note**: Weights are not distributed with this source code; they are downloaded from Hugging Face on first start.
+- **Conference Server**: Async Python service (`moshi.conference`) that mixes audio, coordinates persona prompts, streams Moshi+Mimi inference on CUDA devices, and serves the static UI over HTTPS/WebSocket.
+- **Client Frontend / UI**: React-based UI responsible for microphone capture, speaker playback, and WebSocket transport using WASM helpers and Opus compression to minimize bandwidth.
+- **Moshi**: Core inference engine for audio generation, derived from Kyutai's models and running NVIDIA PersonaPlex weights with performance tweaks for Blackwell GPUs.
+- **Mimi**: Neural audio codec using Residual Vector Quantization (RVQ) so model I/O stays compact instead of tokenized text.
+- **Weights**: Pre-trained PersonaPlex weights distributed under the NVIDIA Open Model License. They are fetched from Hugging Face on first run rather than shipped in this repo.
 
 ## Requirements
 
