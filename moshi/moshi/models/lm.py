@@ -1094,6 +1094,11 @@ class LMGen(StreamingModule[_LMGenState]):
                 break
 
     def _step_text_prompt_core(self) -> Iterator[None]:
+        if not self.text_prompt_tokens:
+            # Nothing to inject for text prompts; skip this phase.
+            print('Skipping text prompt; no tokens configured.')
+            return
+
         for text_prompt_token in self.text_prompt_tokens:
             yield
             self.step(
