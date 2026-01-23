@@ -51,7 +51,7 @@ The platform is split between a Python conference server that mixes audio, runs 
 ## Requirements
 
 - **Hardware**: Recommended 2 CUDA devices, minimum 2x RTX 3090. Tested on 1x RTX 3090 and 1x RTX 5090. VRAM consumption: ~19.5GB per GPU. Two RTX 3090s should be just fine as well. Alternatively data center-grade compute (i.e. A100/H100). The system runs one moshi instance per GPU together with its respective mimi codecs. CPU is not used heavily, only for mixing and simple SRC.
-- **Software**: Tested with Python 3.11.12, Pytorch nightly (torch-2.11.0.dev20260117+cu128), CUDA 12.8, Transformers 4.57.3. Confer requirements.txt for rough guidance.
+- **Software**: Tested with Python 3.11.12, Pytorch nightly (torch-2.11.0.dev20260117+cu128), CUDA 12.8, Transformers 4.57.3. Confer requirements.txt for rough guidance. *(Optional)* Install `accelerate` if you plan to use the new CPU offload mode: `pip install accelerate`.
 - **Power Consumption**: About 240W for RTX 3090, 190W for RTX 5090 (continuous during conversation)
 - **Hugging Face account** for downloading weights.
 - **Network**: Should be as low-latency as possible, audio buffering is set to 80ms. LAN/localhost connection recommended.
@@ -119,6 +119,17 @@ source .venv/bin/activate && PYTHONUNBUFFERED=1 python -m moshi.conference --dev
 - `--device-a` and `--device-b`: Specify the CUDA devices for model inference (e.g., `cuda:0` and `cuda:1`).
 - `--static`: Points to the directory containing static files for the conference UI.
 - `--port`: The port on which the server will run (default: 8999).
+- `--cpu-offload`: Optional flag that keeps most of the LM on GPU but spills excess layers to CPU/disk using Hugging Face Accelerate (install with `pip install accelerate`). Useful if your GPU VRAM is under ~20 GB.
+
+### CPU Offload (Optional)
+
+Both the WebSocket server (`python -m moshi.server`) and offline tool (`python -m moshi.offline`) accept `--cpu-offload`. When present we use Accelerate’s device map support to keep attention blocks on CUDA while offloading remaining layers to CPU, enabling PersonaPlex inference on cards with less VRAM.
+
+Example:
+
+```bash
+python -m moshi.server --device cuda:0 --cpu-offload --static conference_ui --port 8998
+```
 
 ## Credits / License / Copyright / Authors
 

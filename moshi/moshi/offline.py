@@ -174,6 +174,7 @@ def run_inference(
     topk_text: int,
     greedy: bool,
     save_voice_prompt_embeddings: bool,
+    cpu_offload: bool = False,
 ):
     """Run offline inference using an input WAV as the user-side stream.
 
@@ -204,7 +205,11 @@ def run_inference(
     log("info", "loading moshi")
     if moshi_weight is None:
         moshi_weight = hf_hub_download(hf_repo, loaders.MOSHI_NAME)  # type: ignore
-    lm = loaders.get_moshi_lm(moshi_weight, device=device)
+    lm = loaders.get_moshi_lm(
+        moshi_weight,
+        device=device,
+        cpu_offload=cpu_offload,
+    )
     lm.eval()
     log("info", "moshi loaded")
 
@@ -379,6 +384,11 @@ def main():
         "--device", type=str, default="cuda", help="Device on which to run, defaults to 'cuda'."
     )
     parser.add_argument("--seed", type=int, default=-1, help="Seed for reproducibility (-1 disables)")
+    parser.add_argument(
+        "--cpu-offload",
+        action="store_true",
+        help="Offload LM layers to CPU when GPU VRAM is insufficient (requires 'accelerate').",
+    )
 
     args = parser.parse_args()
 
@@ -421,6 +431,7 @@ def main():
             topk_text=args.topk_text,
             greedy=greedy,
             save_voice_prompt_embeddings=False,
+            cpu_offload=args.cpu_offload,
         )
 
 

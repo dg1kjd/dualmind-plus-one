@@ -371,6 +371,11 @@ def main():
                              "Use this to select a different pre-trained model.")
     parser.add_argument("--device", type=str, default="cuda", help="Device on which to run, defaults to 'cuda'.")
     parser.add_argument(
+        "--cpu-offload",
+        action="store_true",
+        help="Offload LM layers to CPU when GPU VRAM is insufficient (requires 'accelerate').",
+    )
+    parser.add_argument(
         "--voice-prompt-dir",
         type=str,
         help=(
@@ -435,7 +440,11 @@ def main():
     logger.info("loading moshi")
     if args.moshi_weight is None:
         args.moshi_weight = hf_hub_download(args.hf_repo, loaders.MOSHI_NAME)
-    lm = loaders.get_moshi_lm(args.moshi_weight, device=args.device)
+    lm = loaders.get_moshi_lm(
+        args.moshi_weight,
+        device=args.device,
+        cpu_offload=args.cpu_offload,
+    )
     lm.eval()
     logger.info("moshi loaded")
     state = ServerState(
