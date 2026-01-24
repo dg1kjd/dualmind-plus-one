@@ -248,6 +248,39 @@
             margin-bottom: 5px;
         }
 
+        .prompt-label {
+            display: flex;
+            align-items: center;
+            gap: 10px;
+        }
+
+        .prompt-update-btn {
+            padding: 4px 12px;
+            font-size: 0.75rem;
+            background: rgba(118, 185, 0, 0.15);
+            border: 1px solid rgba(118, 185, 0, 0.4);
+            border-radius: 999px;
+            color: #d0f4a2;
+            cursor: pointer;
+            text-transform: uppercase;
+            letter-spacing: 0.5px;
+            transition: background 0.2s, border-color 0.2s;
+        }
+
+        .prompt-update-btn:hover {
+            background: rgba(118, 185, 0, 0.3);
+            border-color: #76b900;
+            color: #fff;
+        }
+
+        .prompt-update-btn:disabled {
+            opacity: 0.4;
+            cursor: not-allowed;
+            background: rgba(255,255,255,0.08);
+            border-color: rgba(255,255,255,0.1);
+            color: #999;
+        }
+
         select, input[type="text"], textarea {
             width: 100%;
             padding: 10px 15px;
@@ -563,7 +596,9 @@
                             <button class="preset-btn" onclick="setPreset('A', 'mlengineer')">🤖 ML Engineer</button>
                             <button class="preset-btn" onclick="setPreset('A', 'psychologist')">🧠 Psychologist</button>
                         </div>
-                        <label>System Prompt</label>
+                        <label class="prompt-label">System Prompt
+                            <button type="button" class="prompt-update-btn" id="promptUpdateA">Inject</button>
+                        </label>
                         <textarea id="promptA">You enjoy having a good conversation. You are curious and ask thoughtful questions.</textarea>
                     </div>
                 </div>
@@ -609,7 +644,9 @@
                             <button class="preset-btn" onclick="setPreset('B', 'mlengineer')">🤖 ML Engineer</button>
                             <button class="preset-btn" onclick="setPreset('B', 'psychologist')">🧠 Psychologist</button>
                         </div>
-                        <label>System Prompt</label>
+                        <label class="prompt-label">System Prompt
+                            <button type="button" class="prompt-update-btn" id="promptUpdateB">Inject</button>
+                        </label>
                         <textarea id="promptB">You enjoy having a good conversation. You share interesting stories and perspectives.</textarea>
                     </div>
                 </div>

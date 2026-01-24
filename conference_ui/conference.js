@@ -147,6 +147,8 @@ class ConferenceClient {
             voiceB: document.getElementById('voiceB'),
             promptA: document.getElementById('promptA'),
             promptB: document.getElementById('promptB'),
+            promptUpdateA: document.getElementById('promptUpdateA'),
+            promptUpdateB: document.getElementById('promptUpdateB'),
             textA: document.getElementById('textA'),
             textB: document.getElementById('textB'),
             startBtn: document.getElementById('startBtn'),
@@ -181,6 +183,14 @@ class ConferenceClient {
             this.refreshPersonaState('B');
             this.updateConfig();
         });
+
+        const registerPromptUpdate = (persona) => {
+            const button = persona === 'A' ? this.elements.promptUpdateA : this.elements.promptUpdateB;
+            if (!button) return;
+            button.addEventListener('click', () => this.handlePromptUpdate(persona));
+        };
+        registerPromptUpdate('A');
+        registerPromptUpdate('B');
     }
     
     initVisualizers() {
@@ -752,6 +762,51 @@ class ConferenceClient {
         this.ws.send(message);
     }
 
+    handlePromptUpdate(persona) {
+        if (this.isPersonaDisabled(persona)) {
+            console.warn(`[PromptUpdate] Persona ${persona} is disabled; update ignored.`);
+            return;
+        }
+        const promptEl = persona === 'A' ? this.elements.promptA : this.elements.promptB;
+        const promptText = promptEl?.value?.trim();
+        if (!promptText) {
+            console.warn(`[PromptUpdate] Empty prompt for persona ${persona}; ignored.`);
+            return;
+        }
+
+        if (!this.isRunning) {
+            console.log(`[PromptUpdate] Session not running; storing prompt for Persona ${persona}`);
+            this.updateConfig();
+            return;
+        }
+
+        console.log(`[PromptUpdate] Injecting prompt for persona ${persona}`);
+        this.sendPromptInjection(persona, promptText);
+
+        const button = persona === 'A' ? this.elements.promptUpdateA : this.elements.promptUpdateB;
+        if (button) {
+            const originalText = button.textContent;
+            button.disabled = true;
+            button.textContent = 'Updating…';
+            setTimeout(() => {
+                button.textContent = originalText;
+                this.refreshPersonaState(persona);
+            }, 1200);
+        }
+    }
+
+    sendPromptInjection(persona, promptText) {
+        if (!this.ws || this.ws.readyState !== WebSocket.OPEN) {
+            console.warn('Cannot inject prompt: WebSocket not connected');
+            return;
+        }
+        const payload = new TextEncoder().encode(JSON.stringify({ persona, prompt: promptText }));
+        const message = new Uint8Array(1 + payload.length);
+        message[0] = 0x0B; // Prompt injection type
+        message.set(payload, 1);
+        this.ws.send(message);
+    }
+
     isPersonaDisabled(persona) {
         const select = persona === 'A' ? this.elements.voiceA : this.elements.voiceB;
         if (!select) return false;
@@ -771,7 +826,7 @@ class ConferenceClient {
         }
         const promptEl = persona === 'A' ? this.elements.promptA : this.elements.promptB;
         if (promptEl) {
-            promptEl.disabled = disabled || this.isRunning;
+            promptEl.disabled = disabled;
         }
         const presetContainer = this.presetContainers?.[persona];
         if (presetContainer) {
@@ -779,6 +834,10 @@ class ConferenceClient {
             buttons.forEach((btn) => {
                 btn.disabled = disabled || this.isRunning;
             });
+        }
+        const updateBtn = persona === 'A' ? this.elements.promptUpdateA : this.elements.promptUpdateB;
+        if (updateBtn) {
+            updateBtn.disabled = disabled;
         }
     }
 
