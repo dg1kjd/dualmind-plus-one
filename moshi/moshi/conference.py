@@ -284,9 +284,12 @@ def persona_worker_process(
             else:
                 lm_gen.load_voice_prompt(voice_path)
         
-        lm_gen.text_prompt_tokens = text_tokenizer.encode(
-            wrap_with_system_tags(text_prompt)
-        ) if text_prompt else None
+        if text_prompt:
+            wrapped_prompt = wrap_with_system_tags(text_prompt)
+            lm_gen.text_prompt_tokens = text_tokenizer.encode(wrapped_prompt)
+            print(f"[{name}] Configured system prompt: {wrapped_prompt}")
+        else:
+            lm_gen.text_prompt_tokens = None
         current_voice = voice_prompt
         current_prompt = text_prompt
     
@@ -361,8 +364,29 @@ def persona_worker_process(
     def process_system_prompts():
         """Process voice and text prompts synchronously"""
         with torch.no_grad():
+            if lm_gen.text_prompt_tokens is None:
+                print(f"[{name}] No system prompt tokens configured; skipping step_system_prompts")
+            else:
+                print(f"[{name}] step_system_prompts with {len(lm_gen.text_prompt_tokens)} tokens")
             lm_gen.step_system_prompts(mimi)
             mimi.reset_streaming()
+
+    def inject_text_prompt(text_prompt: str):
+        if not text_prompt:
+            print(f"[{name}] Empty prompt injection requested; ignoring")
+            return
+        tokens = text_tokenizer.encode(text_prompt.strip())
+        if not tokens:
+            print(f"[{name}] Prompt injection produced no tokens; ignoring")
+            return
+        print(f"[{name}] Injecting {len(tokens)} text prompt tokens")
+        previous_tokens = lm_gen.text_prompt_tokens
+        lm_gen.text_prompt_tokens = tokens
+        try:
+            with torch.no_grad():
+                lm_gen._step_text_prompt()
+        finally:
+            lm_gen.text_prompt_tokens = previous_tokens
     
     # Main loop - blocking wait for frame signals (synchronized to mic timing)
     try:
@@ -383,6 +407,9 @@ def persona_worker_process(
             elif msg[0] == "system_prompts":
                 process_system_prompts()
                 status_queue.put(("system_prompts_done",))
+            elif msg[0] == "inject_prompt":
+                inject_text_prompt(msg[1])
+                status_queue.put(("prompt_injected",))
             elif msg[0] == "frame_ready":
                 # Read audio from shared input buffer
                 frame = input_buffer.read()
@@ -660,6 +687,21 @@ class ConferenceServer:
                                     self.persona_b.ctrl_queue.put(("config", sanitized_voice, prompt))
                         except Exception as e:
                             logger.error(f"[recv_loop] Config error: {e}")
+                    elif kind == 11:  # Prompt injection
+                        try:
+                            payload = json.loads(data[1:].decode('utf-8'))
+                            persona_label = payload.get('persona')
+                            prompt_text = self._sanitize_prompt(payload.get('prompt', ''))
+                            if not prompt_text:
+                                continue
+                            if persona_label == 'A' and persona_a_enabled:
+                                self.persona_a.ctrl_queue.put(("inject_prompt", prompt_text))
+                                clog.log("info", "Queued prompt injection for PersonaA")
+                            elif persona_label == 'B' and persona_b_enabled:
+                                self.persona_b.ctrl_queue.put(("inject_prompt", prompt_text))
+                                clog.log("info", "Queued prompt injection for PersonaB")
+                        except Exception as e:
+                            logger.error(f"[recv_loop] Prompt injection error: {e}")
             except Exception as e:
                 logger.error(f"[recv_loop] Exception: {e}")
             finally:
@@ -813,6 +855,8 @@ class ConferenceServer:
                                                 text_queue.put_nowait(("A", a_text))
                                             except asyncio.QueueFull:
                                                 pass
+                                elif msg[0] == "system_prompts_done":
+                                    clog.log("info", "PersonaA runtime system prompts applied")
                             except:
                                 pass
                         
@@ -834,6 +878,8 @@ class ConferenceServer:
                                                 text_queue.put_nowait(("B", b_text))
                                             except asyncio.QueueFull:
                                                 pass
+                                elif msg[0] == "system_prompts_done":
+                                    clog.log("info", "PersonaB runtime system prompts applied")
                             except:
                                 pass
                         
