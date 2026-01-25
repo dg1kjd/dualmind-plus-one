@@ -24,7 +24,25 @@ import sys
 import random
 import string
 from typing import Optional
-from ..client_utils import make_log, colorize
+
+from .logging_interface import LoggingProvider
+
+
+_provider: Optional[LoggingProvider] = None
+
+
+def configure_logging(provider: LoggingProvider):
+    """Wire a concrete logging provider implementation."""
+    global _provider
+    _provider = provider
+
+
+def _get_provider() -> LoggingProvider:
+    if _provider is None:
+        raise RuntimeError(
+            "Logging provider not configured. Call configure_logging() during startup."
+        )
+    return _provider
 
 
 def random_id(n=4):
@@ -52,11 +70,14 @@ def setup_logger(name: str, log_file=None, level=logging.INFO):
 
 
 def print_log(level: str, msg: str, prefix: Optional[str] = None, info_color: Optional[str] = None):
-    colorized_msg = make_log(level, msg) if info_color is None or level != "info" else colorize(msg, info_color)
+    provider = _get_provider()
+    formatted = provider.make_log(level, msg)
+    if level == "info" and info_color is not None:
+        formatted = provider.colorize(formatted, info_color)
     if prefix is None:
-        print(colorized_msg)
+        print(formatted)
     else:
-        print(prefix + colorized_msg)
+        print(prefix + formatted)
 
 
 class ColorizedLog(object):
@@ -71,5 +92,5 @@ class ColorizedLog(object):
     def randomize(cls):
         cid = random_id()
         color = random.choice(["91", "92", "93", "94", "95", "96", "97"])
-        prefix = colorize(f"[{cid}] ", color)
+        prefix = _get_provider().colorize(f"[{cid}] ", color)
         return cls(prefix=prefix, info_color=color)

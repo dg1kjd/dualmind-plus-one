@@ -7,6 +7,9 @@
 from dataclasses import dataclass
 import sys
 
+from .utils.logging_interface import LoggingProvider
+from .utils.logging import configure_logging
+
 
 def colorize(text, color):
     code = f"\033[{color}m"
@@ -209,5 +212,21 @@ class Printer:
 
 
 AnyPrinter = Printer | RawPrinter
+
+
+
+class ClientLoggingProvider(LoggingProvider):
+    """High-level implementation used by server/offline code paths."""
+
+    def colorize(self, text: str, color: str) -> str:
+        return colorize(text, color)
+
+    def make_log(self, level: str, msg: str) -> str:
+        return make_log(level, msg)
+
+
+def setup_client_logging():
+    """Configure low-level logging utilities to use the client implementation."""
+    configure_logging(ClientLoggingProvider())
 
 

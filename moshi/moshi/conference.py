@@ -160,10 +160,13 @@ class SharedOutputBuffer:
         
         return audio, text, level
 
+from .client_utils import setup_client_logging
 from .models import loaders, MimiModel, LMModel, LMGen
 from .utils.connection import create_ssl_context, get_lan_ip
 from .utils.logging import setup_logger, ColorizedLog
 
+
+setup_client_logging()
 logger = setup_logger(__name__)
 
 
